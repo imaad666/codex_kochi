@@ -25,6 +25,7 @@ const DEFAULT_SESSION = {
   runId: null,
   runPath: null,
   fileSystem: {},
+  removedPaths: [],
   activeFile: null,
   searchPhase: "idle",
 };
@@ -64,15 +65,17 @@ function slimChatMessages(messages = []) {
   return messages.filter((message) => !isNoiseChatMessage(message)).slice(-40);
 }
 
-function slimFileSystem(fileSystem = {}) {
+function slimFileSystem(fileSystem = {}, removedPaths = []) {
+  const removed = new Set(removedPaths);
   const slim = {};
-  for (const [filename, entry] of Object.entries(fileSystem).slice(0, 24)) {
+  for (const [filename, entry] of Object.entries(fileSystem)) {
+    if (removed.has(filename)) continue;
     slim[filename] = {
       agent: entry?.agent,
       filename: entry?.filename || filename,
       status: entry?.status,
       summary: String(entry?.summary || "").slice(0, 240),
-      codeLength: String(entry?.code || "").length,
+      code: String(entry?.code || "").slice(0, 64_000),
     };
   }
   return slim;
@@ -82,7 +85,10 @@ export function sanitizeSessionPatch(patch = {}) {
   const next = { ...patch };
   if (next.inspoCandidates) next.inspoCandidates = slimInspoCandidates(next.inspoCandidates);
   if (next.attachments) next.attachments = slimAttachments(next.attachments);
-  if (next.fileSystem) next.fileSystem = slimFileSystem(next.fileSystem);
+  if (next.fileSystem) {
+    next.fileSystem = slimFileSystem(next.fileSystem, next.removedPaths || patch.removedPaths || []);
+  }
+  if (next.removedPaths) next.removedPaths = [...new Set(next.removedPaths)].slice(0, 64);
   if (next.chatMessages) next.chatMessages = slimChatMessages(next.chatMessages);
   if (next.searchLog) next.searchLog = next.searchLog.slice(-30);
   if (next.searchGraphData?.branches) {

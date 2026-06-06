@@ -736,18 +736,30 @@ app.post("/api/runs/:runId/push-github", async (req, res) => {
       return res.status(401).json({ error: "Sign in with GitHub first" });
     }
     const runId = req.params.runId;
-    const manifest = JSON.parse(await storage.readText(runManifestPath(runId)));
     const repoName = String(req.body?.repoName || "").trim();
     if (!repoName) {
       return res.status(400).json({ error: "Create a repo first before pushing code" });
     }
+    const workspaceFiles = Array.isArray(req.body?.files)
+      ? req.body.files
+          .map((file) => ({
+            path: String(file.path || file.filename || "").trim(),
+            content: String(file.content ?? file.code ?? ""),
+          }))
+          .filter((file) => file.path)
+      : [];
+    const deletePaths = Array.isArray(req.body?.deletePaths)
+      ? req.body.deletePaths.map((path) => String(path || "").trim()).filter(Boolean)
+      : [];
     const result = await pushRunToGitHub({
       token: user.token,
       login: user.login,
       runId,
-      prompt: manifest.prompt,
+      prompt: String(req.body?.prompt || "").trim(),
       repoName,
       repoOwner: String(req.body?.repoOwner || user.login).trim(),
+      files: workspaceFiles,
+      deletePaths,
     });
     res.json(result);
   } catch (error) {

@@ -82,7 +82,7 @@ async function callSubagentGroq({ agent, step, intent, plan, attachments, includ
     sharedContext,
     priorSummaries,
   });
-  const user = attachmentContent(userText, attachments, { includeImages });
+  const user = attachmentContent(userText, attachments, { includeImages: false });
   const system = workerSystemPrompt(agent);
 
   let lastError = null;
@@ -174,7 +174,7 @@ export async function runAgentSubagents({
       intent,
       plan,
       attachments: visionAttachments,
-      includeImages,
+      includeImages: false,
       sharedContext,
       priorSummaries,
     });

@@ -196,6 +196,22 @@ function normalizeUserContent(user) {
   return user;
 }
 
+/** Groq text/chat models expect string message content — flatten multimodal arrays. */
+function coerceGroqTextContent(user) {
+  if (typeof user === "string") return user;
+  if (!Array.isArray(user)) return String(user || "");
+  return user
+    .map((part) => {
+      if (part?.type === "text") return part.text;
+      if (part?.type === "image_url") {
+        return "[Image attachment included — use the prompt text for visual context.]";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function extractJsonObject(text) {
   const trimmed = String(text || "").trim();
   if (!trimmed) {
@@ -257,10 +273,7 @@ export async function groqJson({
     3200
   );
 
-  const userContent = truncateText(
-    normalizeUserContent(user),
-    Math.max(1500, requestCharBudget - systemWithSchema.length)
-  );
+  const userContent = truncateText(coerceGroqTextContent(user), Math.max(1500, requestCharBudget - systemWithSchema.length));
 
   await groqThrottle();
 
@@ -374,6 +387,7 @@ export async function groqText({
   const { userContent, cappedOutput } = chatMode
     ? fitChatPayload(systemContent.length, user, maxTokens)
     : fitUserPayload(systemContent.length, user, maxTokens);
+  const messageContent = String(coerceGroqTextContent(userContent) || "");
 
   await groqThrottle();
 
@@ -389,7 +403,7 @@ export async function groqText({
       max_tokens: cappedOutput,
       messages: [
         { role: "system", content: systemContent },
-        { role: "user", content: userContent },
+        { role: "user", content: messageContent },
       ],
     }),
   });

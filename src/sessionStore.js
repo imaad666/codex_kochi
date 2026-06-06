@@ -37,6 +37,23 @@ export function proxyImageUrl(url) {
   return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 
+export function hydrateFileSystemFromSession(fileSystem = {}, removedPaths = []) {
+  const removed = new Set(removedPaths);
+  const next = {};
+  for (const [filename, entry] of Object.entries(fileSystem || {})) {
+    if (removed.has(filename)) continue;
+    if (!entry?.code && !entry?.codeLength) continue;
+    next[filename] = {
+      code: String(entry.code || ""),
+      agent: entry.agent || "GitHub",
+      filename: entry.filename || filename,
+      status: entry.status || "complete",
+      summary: entry.summary || "",
+    };
+  }
+  return next;
+}
+
 export async function loadRunFiles(runId, manifest) {
   const fileSystem = {};
   for (const file of manifest.files || []) {

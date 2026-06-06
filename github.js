@@ -303,20 +303,83 @@ export async function deleteAllGitHubRepoFiles({
   };
 }
 
-export async function pushRunToGitHub({ token, login, runId, prompt, repoName, repoOwner }) {
-  const manifest = JSON.parse(await storage.readText(runManifestPath(runId)));
-  const files = await listRunFilesRecursive(runId);
-  if (!files.length) throw new GroqError("No generated files to push");
+export async function pushRunToGitHub({
+  token,
+  login,
+  runId,
+  prompt,
+  repoName,
+  repoOwner,
+  files: overrideFiles,
+  deletePaths = [],
+}) {
+  let files;
+  if (Array.isArray(overrideFiles)) {
+    files = overrideFiles
+      .map((file) => ({
+        path: String(file.path || file.filename || "").trim(),
+        content: String(file.content ?? file.code ?? ""),
+      }))
+      .filter((file) => file.path);
+  } else {
+    try {
+      await storage.readText(runManifestPath(runId));
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw new GroqError(
+          "No saved run on the server — finish a swarm first, or push from your current workspace files."
+        );
+      }
+      throw error;
+    }
+    files = await listRunFilesRecursive(runId);
+  }
+
+  const pathsToDelete = [...new Set(deletePaths.map((path) => String(path || "").trim()).filter(Boolean))];
+  if (!files.length && !pathsToDelete.length) throw new GroqError("No files to push");
 
   const owner = repoOwner || login;
-  const name = repoName || slugifyRepoName(prompt || manifest.prompt);
+  const name = repoName || slugifyRepoName(prompt || "open-ide-project");
   const repo = await githubFetch(`/repos/${owner}/${name}`, { token });
   const repoSlug = repo.name || name;
+  const branch = repo.default_branch || "main";
+
+  let deleted = 0;
+  for (const path of pathsToDelete) {
+    try {
+      let sha;
+      try {
+        const existing = await githubFetch(
+          `/repos/${owner}/${repoSlug}/contents/${encodeRepoPath(path)}?ref=${encodeURIComponent(branch)}`,
+          { token }
+        );
+        if (!Array.isArray(existing) && existing.sha) sha = existing.sha;
+      } catch (error) {
+        if (error.status === 404) continue;
+        throw error;
+      }
+      if (!sha) continue;
+
+      await githubFetch(`/repos/${owner}/${repoSlug}/contents/${encodeRepoPath(path)}`, {
+        token,
+        method: "DELETE",
+        body: {
+          message: `Open IDE: remove ${path}`,
+          sha,
+          branch,
+        },
+      });
+      deleted += 1;
+    } catch {
+      // skip paths we cannot delete (permissions, stale sha, etc.)
+    }
+  }
 
   for (const file of files) {
+    if (!file.content) continue;
     let sha;
     try {
-      const existing = await githubFetch(`/repos/${owner}/${repoSlug}/contents/${file.path}`, {
+      const existing = await githubFetch(`/repos/${owner}/${repoSlug}/contents/${encodeRepoPath(file.path)}`, {
         token,
       });
       sha = existing.sha;
@@ -324,7 +387,7 @@ export async function pushRunToGitHub({ token, login, runId, prompt, repoName, r
       if (error.status !== 404) throw error;
     }
 
-    await githubFetch(`/repos/${owner}/${repoSlug}/contents/${file.path}`, {
+    await githubFetch(`/repos/${owner}/${repoSlug}/contents/${encodeRepoPath(file.path)}`, {
       token,
       method: "PUT",
       body: {
@@ -339,6 +402,7 @@ export async function pushRunToGitHub({ token, login, runId, prompt, repoName, r
     url: repo.html_url || `https://github.com/${owner}/${repoSlug}`,
     repo: `${owner}/${repoSlug}`,
     files: files.map((f) => f.path),
+    deleted,
   };
 }
 

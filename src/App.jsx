@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import { streamSwarmGenerate, searchInspiration as fetchInspiration, postChat, syncSession } from "./eventClient.js";
 import CodeEditor, { codeEditorCss } from "./CodeEditor.jsx";
+import { lintSource } from "./codeLint.js";
 import {
   ReactFlow,
   Background,
@@ -33,6 +34,7 @@ import {
 import {
   fetchSession,
   getOrCreateSessionId,
+  hydrateFileSystemFromSession,
   loadRunFiles,
   proxyImageUrl,
 } from "./sessionStore.js";
@@ -526,6 +528,7 @@ function App() {
   const [runningAgents, setRunningAgents] = useState([]);
   const [typedPrompt, setTypedPrompt] = useState("");
   const [fileSystem, setFileSystem] = useState({});
+  const [removedPaths, setRemovedPaths] = useState([]);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [searchPhase, setSearchPhase] = useState("idle");
@@ -549,6 +552,8 @@ function App() {
   const [inspoMood, setInspoMood] = useState("");
   const [sessionId, setSessionId] = useState(() => getOrCreateSessionId());
   const [sessionReady, setSessionReady] = useState(false);
+  const [saveFlash, setSaveFlash] = useState("");
+  const saveFlashTimerRef = useRef(null);
   const [savedSession, setSavedSession] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [githubConfigured, setGithubConfigured] = useState(false);
@@ -1069,6 +1074,7 @@ function App() {
         setFileSystem(next);
         setActiveFile(data.files[0]?.path || null);
         setGithubRepo((current) => ({ ...current, ...normalized }));
+        setRemovedPaths((current) => current.filter((path) => !(path in next)));
         if (normalized.fullName) repoAutoLoadRef.current.add(normalized.fullName);
         const truncatedNote = data.truncated ? " (large repo — first 120 source files)" : "";
         appendChat(
@@ -1217,7 +1223,19 @@ function App() {
   }, [newRepoName, repoBusy, authUser, appendChat]);
 
   const pushToGitHub = useCallback(async () => {
-    if (!status.runId || outputBusy) return;
+    const workspaceFiles = Object.entries(fileSystem)
+      .map(([path, entry]) => ({
+        path,
+        content: String(entry?.code || ""),
+      }))
+      .filter((file) => file.path);
+    const deletePaths = [...removedPaths];
+    if (!workspaceFiles.length && !deletePaths.length) {
+      appendChat("system", "Nothing to push — workspace is empty.");
+      return;
+    }
+    const runId = status.runId || sessionId;
+    if (!runId || outputBusy) return;
     if (!authUser?.authenticated) {
       window.location.assign("/api/auth/github");
       return;
@@ -1229,22 +1247,33 @@ function App() {
     }
     setOutputBusy("push");
     try {
-      const res = await fetch(`/api/runs/${status.runId}/push-github`, {
+      const res = await fetch(`/api/runs/${runId}/push-github`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoName: githubRepo.name, repoOwner: githubRepo.owner }),
+        body: JSON.stringify({
+          repoName: githubRepo.name,
+          repoOwner: githubRepo.owner,
+          prompt,
+          files: workspaceFiles,
+          deletePaths,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Push failed");
-      appendChat("controller", `Pushed to GitHub: ${data.url}`);
+      const deletedNote =
+        data.deleted > 0 ? ` Removed ${data.deleted} file(s) from GitHub.` : "";
+      appendChat("controller", `Pushed to GitHub: ${data.url}.${deletedNote}`);
+      if (deletePaths.length) {
+        setRemovedPaths((current) => current.filter((path) => !deletePaths.includes(path)));
+      }
       window.open(data.url, "_blank", "noopener,noreferrer");
     } catch (error) {
       appendChat("system", error.message || "GitHub push failed");
     } finally {
       setOutputBusy("");
     }
-  }, [status.runId, outputBusy, authUser, githubRepo, appendChat]);
+  }, [fileSystem, removedPaths, status.runId, sessionId, outputBusy, authUser, githubRepo, prompt, appendChat]);
 
   const signOut = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
@@ -1325,18 +1354,33 @@ function App() {
           runId: session.runId,
           runPath: session.runPath || "",
         }));
+      }
+      const sessionRemoved = Array.isArray(session.removedPaths) ? session.removedPaths : [];
+      if (sessionRemoved.length) setRemovedPaths(sessionRemoved);
+
+      const sessionFiles = hydrateFileSystemFromSession(session.fileSystem, sessionRemoved);
+      if (Object.keys(sessionFiles).length) {
+        setFileSystem(sessionFiles);
+        if (session.planSteps?.length) {
+          const agentStatus = {};
+          for (const entry of Object.values(sessionFiles)) {
+            if (entry?.agent && entry.status === "complete") agentStatus[entry.agent] = "complete";
+          }
+          hydrateExecutionGraph(session.planSteps, { agentStatus });
+        }
+      } else if (session.runId) {
         try {
           const manifestRes = await fetch(`/api/runs/${session.runId}/manifest`);
           if (manifestRes.ok) {
             const manifest = await manifestRes.json();
             const files = await loadRunFiles(session.runId, manifest);
+            for (const path of sessionRemoved) delete files[path];
             if (Object.keys(files).length) {
               setFileSystem(files);
-              const restoredFiles = files;
               setPlanSummary(manifest.plan?.summary || session.planSummary || "");
               setSearchPhase("executing");
               const agentStatus = {};
-              for (const entry of Object.values(restoredFiles)) {
+              for (const entry of Object.values(files)) {
                 if (entry?.agent && entry.status === "complete") agentStatus[entry.agent] = "complete";
               }
               hydrateExecutionGraph(manifest.plan?.steps || session.planSteps || [], {
@@ -1345,18 +1389,7 @@ function App() {
             }
           }
         } catch {
-          if (session.fileSystem && Object.keys(session.fileSystem).length) {
-            setFileSystem(session.fileSystem);
-          }
-        }
-      } else if (session.fileSystem && Object.keys(session.fileSystem).length) {
-        setFileSystem(session.fileSystem);
-        if (session.planSteps?.length) {
-          const agentStatus = {};
-          for (const entry of Object.values(session.fileSystem)) {
-            if (entry?.agent && entry.status === "complete") agentStatus[entry.agent] = "complete";
-          }
-          hydrateExecutionGraph(session.planSteps, { agentStatus });
+          // run storage missing on server — keep empty workspace
         }
       }
       setSessionReady(true);
@@ -1404,6 +1437,7 @@ function App() {
         githubRepo,
         localOnly,
         fileSystem,
+        removedPaths,
         activeFile,
         searchPhase,
         runId: status.runId || null,
@@ -1433,6 +1467,7 @@ function App() {
     githubRepo,
     localOnly,
     fileSystem,
+    removedPaths,
     activeFile,
     searchPhase,
     status.runId,
@@ -1651,6 +1686,7 @@ function App() {
 
   const clearWorkspace = useCallback(() => {
     setFileSystem({});
+    setRemovedPaths([]);
     setActiveFile(null);
     setRunningAgents([]);
     setSearchPhase("idle");
@@ -1696,6 +1732,102 @@ function App() {
     [activeFile]
   );
 
+  const flashSaveMessage = useCallback((message) => {
+    setSaveFlash(message);
+    if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current);
+    saveFlashTimerRef.current = setTimeout(() => setSaveFlash(""), 2000);
+  }, []);
+
+  const saveActiveFile = useCallback(() => {
+    if (!activeFile || !fileSystem[activeFile]) {
+      flashSaveMessage("Nothing to save");
+      return;
+    }
+    const entry = fileSystem[activeFile];
+    if (entry.status === "writing") {
+      flashSaveMessage("Agent still writing…");
+      return;
+    }
+
+    setFileSystem((current) => {
+      const latest = current[activeFile];
+      if (!latest) return current;
+      const nextFileSystem = {
+        ...current,
+        [activeFile]: { ...latest, status: "saved" },
+      };
+      if (sessionReady) {
+        syncSession(sessionId, {
+          stage,
+          prompt,
+          selectedAgents: selected,
+          attachments,
+          inspoCandidates,
+          inspoSelectedIds,
+          inspoMood,
+          chatMessages,
+          searchLog,
+          searchWinner,
+          searchVerdict,
+          searchComparisons,
+          searchSavings,
+          searchGraphData,
+          planSummary,
+          planSteps,
+          githubRepo,
+          localOnly,
+          fileSystem: nextFileSystem,
+          removedPaths,
+          activeFile,
+          searchPhase,
+          runId: status.runId || null,
+          runPath: status.runPath || null,
+        }).catch((error) => console.warn("[session]", error.message));
+      }
+      return nextFileSystem;
+    });
+
+    const issue = lintSource(activeFile, entry.code || "");
+    flashSaveMessage(
+      issue.ok ? `Saved ${basename(activeFile)}` : `Saved ${basename(activeFile)} (has errors)`
+    );
+  }, [
+    activeFile,
+    fileSystem,
+    flashSaveMessage,
+    sessionReady,
+    sessionId,
+    stage,
+    prompt,
+    selected,
+    attachments,
+    inspoCandidates,
+    inspoSelectedIds,
+    inspoMood,
+    chatMessages,
+    searchLog,
+    searchWinner,
+    searchVerdict,
+    searchComparisons,
+    searchSavings,
+    searchGraphData,
+    planSummary,
+    planSteps,
+    githubRepo,
+    localOnly,
+    removedPaths,
+    searchPhase,
+    status.runId,
+    status.runPath,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current);
+    },
+    []
+  );
+
   const deleteWorkspaceFile = useCallback(
     (filePath) => {
       if (!filePath || !fileSystem[filePath]) return;
@@ -1704,24 +1836,83 @@ function App() {
       const remaining = sorted.filter((path) => path !== filePath);
       const nextActive =
         activeFile === filePath ? (remaining[idx] ?? remaining[idx - 1] ?? null) : activeFile;
+      const nextRemoved = [...new Set([...removedPaths, filePath])];
+      setRemovedPaths(nextRemoved);
       setFileSystem((current) => {
         const next = { ...current };
         delete next[filePath];
+        if (sessionReady) {
+          syncSession(sessionId, {
+            stage,
+            prompt,
+            selectedAgents: selected,
+            attachments,
+            inspoCandidates,
+            inspoSelectedIds,
+            inspoMood,
+            chatMessages,
+            searchLog,
+            searchWinner,
+            searchVerdict,
+            searchComparisons,
+            searchSavings,
+            searchGraphData,
+            planSummary,
+            planSteps,
+            githubRepo,
+            localOnly,
+            fileSystem: next,
+            removedPaths: nextRemoved,
+            activeFile: nextActive,
+            searchPhase,
+            runId: status.runId || null,
+            runPath: status.runPath || null,
+          }).catch((error) => appendChat("system", error.message || "Could not save workspace"));
+        }
         return next;
       });
       setActiveFile(nextActive);
-      appendChat("system", `Removed ${filePath} from workspace (not deleted on GitHub until you push).`);
+      flashSaveMessage(`Removed ${basename(filePath)}`);
+      appendChat("system", `Removed ${filePath} from workspace. Push to remove it from GitHub.`);
     },
-    [fileSystem, activeFile, appendChat]
+    [
+      fileSystem,
+      activeFile,
+      removedPaths,
+      appendChat,
+      flashSaveMessage,
+      sessionReady,
+      sessionId,
+      stage,
+      prompt,
+      selected,
+      attachments,
+      inspoCandidates,
+      inspoSelectedIds,
+      inspoMood,
+      chatMessages,
+      searchLog,
+      searchWinner,
+      searchVerdict,
+      searchComparisons,
+      searchSavings,
+      searchGraphData,
+      planSummary,
+      planSteps,
+      githubRepo,
+      localOnly,
+      searchPhase,
+      status.runId,
+      status.runPath,
+    ]
   );
 
   useEffect(() => {
     if (stage !== "ide" || !activeFile) return undefined;
     const onKeyDown = (event) => {
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const tag = event.target?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || event.target?.isContentEditable) return;
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.altKey) return;
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
       event.preventDefault();
       deleteWorkspaceFile(activeFile);
     };
@@ -1775,6 +1966,7 @@ function App() {
       if (resetWorkspace) {
         if (githubRepo?.fullName) repoAutoLoadRef.current.delete(githubRepo.fullName);
         setFileSystem({});
+        setRemovedPaths([]);
         setActiveFile(null);
         workspaceFiles = {};
 
@@ -1904,7 +2096,8 @@ function App() {
     }
 
     if (intent?.type === "push") {
-      if (!hasFiles || !status.runId) {
+      const canPush = hasFiles || removedPaths.length > 0;
+      if (!canPush) {
         appendChat(
           "controller",
           "Nothing to push — the session is empty. Run a new swarm to generate files first."
@@ -2020,6 +2213,7 @@ function App() {
     searchWinner,
     selected,
     fileSystem,
+    removedPaths,
     searchGraphData.branches,
     inspoCandidates,
     inspoSelectedIds,
@@ -3327,7 +3521,7 @@ function App() {
       border-bottom: 2px solid ${CRT.textDim};
       margin-bottom: -1px;
     }
-    .editor { flex: 1; min-height: 0; }
+    .editor { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
     .right {
       flex-shrink: 0;
       min-width: 280px;
@@ -4401,7 +4595,12 @@ function App() {
 
   const files = Object.keys(fileSystem);
   const activeFileEntry = activeFile ? fileSystem[activeFile] : null;
-  const hasOutput = Boolean(status.runId && files.length > 0 && !runningAgents.length);
+  const editorDiagnostic = useMemo(() => {
+    if (!activeFile) return { ok: true };
+    return lintSource(activeFile, activeFileEntry?.code || "");
+  }, [activeFile, activeFileEntry?.code]);
+  const hasWorkspaceFiles = files.length > 0 && !runningAgents.length;
+  const hasRunExport = Boolean(status.runId && hasWorkspaceFiles);
 
   return (
     <>
@@ -4422,11 +4621,13 @@ function App() {
               </span>
             ) : null}
             <div className="ide-header-actions">
-              {hasOutput ? (
+              {hasWorkspaceFiles ? (
                 <>
-                  <button type="button" className="output-btn" disabled={!!outputBusy} onClick={downloadZip}>
-                    Export
-                  </button>
+                  {hasRunExport ? (
+                    <button type="button" className="output-btn" disabled={!!outputBusy} onClick={downloadZip}>
+                      Export
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="output-btn"
@@ -4463,7 +4664,7 @@ function App() {
                     files.map((filename) => (
                       <span
                         key={filename}
-                        className={`tab ${activeFile === filename ? "on" : ""}`}
+                        className={`tab ${activeFile === filename ? "on" : ""} ${fileSystem[filename]?.status === "edited" ? "dirty" : ""}`}
                         onClick={() => setActiveFile(filename)}
                         title={filename}
                       >
@@ -4472,12 +4673,28 @@ function App() {
                     ))
                   )}
                 </div>
+                <div className="editor-toolbar">
+                  <span className="editor-path">{activeFile || "No file open"}</span>
+                  {activeFileEntry?.status === "edited" ? (
+                    <span className="editor-dirty">unsaved</span>
+                  ) : null}
+                  {status.error ? (
+                    <span className="editor-swarm-error" title={status.error}>
+                      {status.error}
+                    </span>
+                  ) : null}
+                  <span className="editor-hint">⌘S save · ⌘⌫ remove file</span>
+                </div>
                 <div className="editor">
+                  {saveFlash ? <div className="save-flash">{saveFlash}</div> : null}
                   <CodeEditor
                     value={activeFileEntry?.code || ""}
                     onChange={updateEditorContent}
+                    onSave={saveActiveFile}
                     readOnly={!activeFile || activeFileEntry?.status === "writing"}
                     placeholder="// Open a repo or run a swarm to load files"
+                    diagnostic={editorDiagnostic}
+                    errorLine={editorDiagnostic?.line}
                   />
                 </div>
               </section>

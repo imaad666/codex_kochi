@@ -166,11 +166,12 @@ export function attachmentText(attachments = [], maxChars = 24000) {
   return lines.length ? `User-provided attachments:\n${lines.join("\n\n")}` : "";
 }
 
-export function attachmentContent(text, attachments = [], { includeImages = true } = {}) {
+export function attachmentContent(text, attachments = [], { includeImages = false } = {}) {
+  const body = String(text || "");
   const hasImages =
     includeImages && attachments.some((attachment) => attachment.kind === "image" && attachment.dataUrl);
-  if (!hasImages) return text;
-  const content = [{ type: "text", text }];
+  if (!hasImages) return body;
+  const content = [{ type: "text", text: body }];
   for (const attachment of attachments) {
     if (attachment.kind === "image" && attachment.dataUrl) {
       content.push({
