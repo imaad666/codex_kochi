@@ -251,3 +251,108 @@ export async function pushRunToGitHub({ token, login, runId, prompt, repoName, r
     files: files.map((f) => f.path),
   };
 }
+
+/** Git commands via GitHub API — works on Vercel without a local .git directory. */
+export async function execGitTerminalCommand({
+  token,
+  owner,
+  name,
+  command,
+  filePaths = [],
+} = {}) {
+  const trimmed = String(command || "").trim();
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts[0] !== "git") throw new GroqError("Not a git command");
+
+  const sub = parts[1];
+  if (sub === "--version") {
+    return "git version 2.43.0 (Open IDE · GitHub API)";
+  }
+
+  if (!owner || !name) {
+    throw new GroqError("Link a GitHub repo first (repo step), then retry git commands.");
+  }
+  if (!token) {
+    throw new GroqError("Sign in with GitHub to use git commands.");
+  }
+
+  const repo = await githubFetch(`/repos/${owner}/${name}`, { token });
+  const branch = repo.default_branch || "main";
+  const remote = `https://github.com/${owner}/${name}.git`;
+
+  if (!sub || sub === "status") {
+    const lines = [
+      `On branch ${branch}`,
+      `Your branch is up to date with 'origin/${branch}'.`,
+      "",
+    ];
+    if (filePaths.length) {
+      lines.push("Changes in workspace (not yet pushed):");
+      for (const filePath of filePaths) {
+        lines.push(`        modified:   ${filePath}`);
+      }
+      lines.push("");
+      lines.push(`Use Push in the toolbar or tell Altbot "push" to sync ${filePaths.length} file(s).`);
+    } else {
+      lines.push("nothing to commit, working tree clean");
+    }
+    return lines.join("\n");
+  }
+
+  if (sub === "remote") {
+    if (parts.includes("-v")) {
+      return `origin\t${remote} (fetch)\norigin\t${remote} (push)`;
+    }
+    return "origin";
+  }
+
+  if (sub === "branch") {
+    if (parts.includes("-a")) {
+      return `* ${branch}\n  remotes/origin/${branch}`;
+    }
+    return `* ${branch}`;
+  }
+
+  if (sub === "log") {
+    let count = 5;
+    const nIndex = parts.indexOf("-n");
+    if (nIndex >= 0 && parts[nIndex + 1]) count = Math.min(20, Number(parts[nIndex + 1]) || 5);
+    if (parts.includes("-1")) count = 1;
+    const commits = await githubFetch(
+      `/repos/${owner}/${name}/commits?sha=${encodeURIComponent(branch)}&per_page=${count}`,
+      { token }
+    );
+    if (!Array.isArray(commits) || !commits.length) return "(no commits)";
+    return commits
+      .map((commit) => {
+        const sha = commit.sha?.slice(0, 7) || "???????";
+        const msg = commit.commit?.message?.split("\n")[0] || "";
+        const author = commit.commit?.author?.name || commit.author?.login || "";
+        return `${sha} ${msg}${author ? ` (${author})` : ""}`;
+      })
+      .join("\n");
+  }
+
+  if (sub === "push") {
+    return [
+      "git push is handled by Open IDE — use the Push button in the title bar",
+      "or tell Altbot: push",
+    ].join("\n");
+  }
+
+  if (sub === "pull") {
+    return "git pull is not available in the cloud IDE. Reload the repo from the repo step to refresh files from GitHub.";
+  }
+
+  if (sub === "clone") {
+    return `Repository already linked: ${owner}/${name}\n${remote}`;
+  }
+
+  if (sub === "diff" || sub === "show") {
+    return "git diff/show are not available in the cloud terminal. Open files in the editor to inspect changes.";
+  }
+
+  throw new GroqError(
+    `git ${sub} is not supported here. Try: status, log, branch, remote -v, push`
+  );
+}

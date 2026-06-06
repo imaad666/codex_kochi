@@ -22,6 +22,7 @@ import {
 import {
   createGitHubRepo,
   deleteAllGitHubRepoFiles,
+  execGitTerminalCommand,
   listUserRepos,
   loadGitHubRepoFiles,
   openGitHubRepo,
@@ -549,6 +550,28 @@ app.post("/api/terminal/exec", async (req, res) => {
   } catch (error) {
     res.status(error instanceof GroqError ? 400 : 500).json({
       error: error instanceof GroqError ? error.message : error.message || "Terminal command failed",
+    });
+  }
+});
+
+app.post("/api/terminal/git", async (req, res) => {
+  try {
+    const user = await resolveAuthUser(req);
+    const command = String(req.body?.command || "").trim();
+    const owner = String(req.body?.owner || req.body?.repoOwner || user?.login || "").trim();
+    const name = String(req.body?.repoName || req.body?.name || "").trim();
+    const filePaths = Array.isArray(req.body?.files) ? req.body.files.map(String) : [];
+    const output = await execGitTerminalCommand({
+      token: user?.token,
+      owner,
+      name,
+      command,
+      filePaths,
+    });
+    res.json({ output });
+  } catch (error) {
+    res.status(error instanceof GroqError ? 400 : 500).json({
+      error: error instanceof GroqError ? error.message : error.message || "Git command failed",
     });
   }
 });

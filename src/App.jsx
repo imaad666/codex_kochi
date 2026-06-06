@@ -1986,73 +1986,45 @@ function App() {
       position: relative;
       z-index: 2;
     }
-    .ide-viewport {
-      background: #1e1e1e;
-    }
-    .ide-shell {
-      background: #1e1e1e;
-      color: #cccccc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .ide-titlebar {
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      height: 36px;
-      padding: 0 12px;
-      background: #252526;
-      border-bottom: 1px solid #1e1e1e;
-      font-size: 12px;
-    }
-    .ide-titlebar-btn {
+    .ide-crt {
       background: transparent;
-      border: 0;
-      color: #cccccc;
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
-      padding: 4px 0;
+      color: ${CRT.text};
+      font-family: "VT323", monospace;
     }
-    .ide-titlebar-btn:hover { color: #fff; }
-    .ide-titlebar-repo {
-      color: #9cdcfe;
-      font-size: 12px;
+    .ide-header {
+      font-size: 18px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .ide-header-title { color: ${CRT.textSoft}; }
+    .ide-header-repo {
+      color: ${CRT.textDim};
+      font-size: 16px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      max-width: 220px;
     }
-    .ide-titlebar-actions {
+    .ide-header-actions {
       margin-left: auto;
       display: flex;
       align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
     }
-    .ide-toolbar-btn {
-      background: #333333;
-      border: 1px solid #454545;
-      color: #cccccc;
-      padding: 3px 10px;
-      font: inherit;
-      font-size: 11px;
-      border-radius: 3px;
-      cursor: pointer;
-    }
-    .ide-toolbar-btn:hover:not(:disabled) {
-      background: #3c3c3c;
-      color: #fff;
-    }
-    .ide-toolbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-    .ide-statusbar {
+    .crt-statusbar {
       flex-shrink: 0;
       display: flex;
       align-items: center;
-      gap: 16px;
-      height: 22px;
+      gap: 12px;
+      height: 28px;
       padding: 0 12px;
-      background: #007acc;
-      color: #fff;
-      font-size: 11px;
+      border-top: 2px solid #3a787899;
+      background: #00000028;
+      color: ${CRT.textDim};
+      font-size: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
     .ide-status-item { opacity: 0.95; }
     .ide-status-item:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2062,42 +2034,41 @@ function App() {
       max-height: 480px;
       display: flex;
       flex-direction: column;
-      background: #1e1e1e;
-      border-top: 1px solid #252526;
+      background: #00000022;
+      border-top: 2px solid #3a787899;
     }
     .panel-tabs {
       flex-shrink: 0;
       display: flex;
       gap: 0;
-      background: #252526;
-      border-bottom: 1px solid #1e1e1e;
+      background: #00000028;
+      border-bottom: 1px solid #3a787866;
     }
     .panel-tab {
       position: relative;
       background: transparent;
       border: 0;
-      border-right: 1px solid #1e1e1e;
-      color: #969696;
-      padding: 6px 14px;
+      border-right: 1px solid #3a787866;
+      color: ${CRT.textDim};
+      padding: 5px 12px;
       font: inherit;
-      font-size: 11px;
+      font-size: 15px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 1px;
       cursor: pointer;
     }
     .panel-tab.on {
-      color: #fff;
-      background: #1e1e1e;
-      border-bottom: 1px solid #1e1e1e;
-      margin-bottom: -1px;
+      color: ${CRT.textSoft};
+      background: #00000030;
+      box-shadow: inset 0 -2px 0 ${CRT.textDim};
     }
     .panel-tab-dot {
       display: inline-block;
-      width: 6px;
-      height: 6px;
+      width: 7px;
+      height: 7px;
       margin-left: 6px;
       border-radius: 50%;
-      background: #c7da2e;
+      background: ${CRT.led};
       vertical-align: middle;
       animation: explorer-pulse 1.2s ease-in-out infinite;
     }
@@ -2112,96 +2083,70 @@ function App() {
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #6a6a6a;
-      font-size: 12px;
+      color: ${CRT.textDim};
+      font-size: 18px;
       padding: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
     .terminal-panel {
       flex: 1;
       min-height: 0;
       display: flex;
       flex-direction: column;
-      background: #0c0c0c;
-      font-family: "JetBrains Mono", Menlo, monospace;
-      font-size: 12px;
+      background: #00000035;
+      font-family: "VT323", monospace;
+      font-size: 16px;
     }
     .terminal-log {
       flex: 1;
       min-height: 0;
       overflow: auto;
       padding: 8px 10px;
-      color: #cccccc;
+      color: ${CRT.textSoft};
       white-space: pre-wrap;
       word-break: break-word;
+      text-shadow: 0 0 8px #dfff3f33;
     }
-    .terminal-line-input { color: #fff; margin-bottom: 4px; }
-    .terminal-line-output { color: #cccccc; margin-bottom: 6px; }
-    .terminal-line-system { color: #6a9955; margin-bottom: 6px; }
-    .terminal-line-error { color: #f48771; margin-bottom: 6px; }
+    .terminal-line-input { color: ${CRT.text}; margin-bottom: 4px; }
+    .terminal-line-output { color: ${CRT.textSoft}; margin-bottom: 6px; }
+    .terminal-line-system { color: ${CRT.textDim}; margin-bottom: 6px; }
+    .terminal-line-error { color: #ff9999; margin-bottom: 6px; }
     .terminal-input-row {
       flex-shrink: 0;
       display: flex;
       align-items: center;
       gap: 8px;
       padding: 6px 10px;
-      border-top: 1px solid #252526;
-      background: #1a1a1a;
+      border-top: 1px solid #3a787866;
+      background: #00000028;
     }
-    .terminal-prompt { color: #4ec9b0; flex-shrink: 0; }
+    .terminal-prompt { color: ${CRT.text}; flex-shrink: 0; }
     .terminal-input {
       flex: 1;
       background: transparent;
       border: 0;
-      color: #fff;
+      color: ${CRT.textSoft};
       font: inherit;
-      font-size: 12px;
+      font-size: 16px;
       outline: none;
-    }
-    .ide-shell .chat {
-      flex: 1;
-      min-height: 0;
-      border-bottom: 0;
-      background: #1e1e1e;
-    }
-    .ide-shell .chat-head {
-      color: #cccccc;
-      font-size: 11px;
-      letter-spacing: 0.06em;
-      background: #252526;
-      border-bottom: 1px solid #1e1e1e;
-    }
-    .ide-shell .chat-tabs {
-      background: #252526;
-      border-bottom: 1px solid #1e1e1e;
-      padding: 4px 8px;
-    }
-    .ide-shell .chat-tab {
-      font-size: 11px;
-      border-radius: 3px;
-      text-transform: none;
-    }
-    .ide-shell .chat-log {
-      font-size: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .ide-shell .chat-input-row {
-      border-top: 1px solid #1e1e1e;
-      background: #252526;
-    }
-    .ide-shell .chat-input {
-      background: #3c3c3c;
-      border: 1px solid #454545;
-      border-radius: 3px;
-      color: #cccccc;
-      font-size: 12px;
-    }
-    .ide-shell .chat-send {
-      font-size: 11px;
-      border-radius: 3px;
     }
     .panel-body .graph-canvas {
       flex: 1;
       min-height: 0;
+    }
+    .ide-crt .work-main {
+      border-right: 2px solid #3a787899;
+      background: transparent;
+    }
+    .ide-crt .right {
+      border-left: 0;
+      background: #00000012;
+    }
+    .ide-crt .chat {
+      flex: 1.15;
+      min-height: 0;
+      border-bottom: 2px solid #3a787866;
     }
     .ide-workspace {
       flex: 1;
@@ -2656,8 +2601,7 @@ function App() {
       min-height: 0;
       display: flex;
       flex-direction: column;
-      border-right: 1px solid #252526;
-      background: #1e1e1e;
+      border-right: 2px solid #3a787899;
     }
     .center {
       flex: 1;
@@ -2669,9 +2613,9 @@ function App() {
     .resize-handle-v,
     .resize-handle-h {
       flex-shrink: 0;
-      background: #252526;
-      opacity: 1;
-      transition: background 0.15s;
+      background: ${CRT.beigeLo};
+      opacity: 0.55;
+      transition: opacity 0.15s;
       z-index: 4;
     }
     .resize-handle-v {
@@ -2688,7 +2632,8 @@ function App() {
     }
     .resize-handle-v:hover,
     .resize-handle-h:hover {
-      background: #007acc;
+      opacity: 0.9;
+      background: ${CRT.textDim};
     }
     .tabs {
       display: flex;
@@ -2725,8 +2670,8 @@ function App() {
       display: flex;
       flex-direction: column;
       min-height: 0;
-      border-left: 1px solid #252526;
-      background: #252526;
+      border-left: 0;
+      background: #00000010;
     }
     .graph-dock {
       flex-shrink: 0;
@@ -3696,26 +3641,30 @@ function App() {
   return (
     <>
       <style>{css}</style>
-      <Monitor full bare>
-        <div className="ide ide-shell">
-          <header className="ide-titlebar">
-            <button type="button" className="ide-titlebar-btn" onClick={goHome} title="Home">
-              Open IDE
+      <Monitor full>
+        <div className="ide ide-crt">
+          <header className="header ide-header">
+            <button type="button" className="header-home" onClick={goHome} title="Back to intro">
+              ⌂ Home
             </button>
+            <span className="ide-header-title">
+              SWARM · GROQ · {status.workerModel || "CONNECTING"}
+              {status.runId ? ` · RUN ${status.runId.slice(0, 8)}` : ""}
+            </span>
             {githubRepo ? (
-              <span className="ide-titlebar-repo" title={githubRepo.url}>
+              <span className="ide-header-repo" title={githubRepo.url}>
                 {githubRepo.fullName}
               </span>
             ) : null}
-            <div className="ide-titlebar-actions">
+            <div className="ide-header-actions">
               {hasOutput ? (
                 <>
-                  <button type="button" className="ide-toolbar-btn" disabled={!!outputBusy} onClick={downloadZip}>
+                  <button type="button" className="output-btn" disabled={!!outputBusy} onClick={downloadZip}>
                     Export
                   </button>
                   <button
                     type="button"
-                    className="ide-toolbar-btn"
+                    className="output-btn"
                     disabled={!!outputBusy || !hasBackend}
                     onClick={runPreview}
                     title={hasBackend ? "Run server.js locally" : "Needs server.js"}
@@ -3724,7 +3673,7 @@ function App() {
                   </button>
                   <button
                     type="button"
-                    className="ide-toolbar-btn"
+                    className="output-btn"
                     disabled={!!outputBusy || !githubRepo}
                     onClick={pushToGitHub}
                   >
@@ -3770,8 +3719,8 @@ function App() {
                     value={activeFileEntry?.code || "// Open a repo or run a swarm to load files"}
                     options={{
                       minimap: { enabled: false },
-                      fontSize: 13,
-                      fontFamily: '"JetBrains Mono", "Fira Code", Menlo, monospace',
+                      fontSize: 14,
+                      fontFamily: "VT323, monospace",
                       lineNumbers: "on",
                       readOnly: true,
                       scrollBeyondLastLine: false,
@@ -3849,7 +3798,7 @@ function App() {
             />
             <aside className="right crt-scroll" style={{ width: rightWidth }}>
               <div className="chat">
-                <div className="chat-head">Agents</div>
+                <div className="chat-head">CHAT · ROUTING</div>
                 <div className="chat-tabs">
                   {chatTargets.map((target) => (
                     <button
@@ -3859,6 +3808,7 @@ function App() {
                       onClick={() => setChatTarget(target.id)}
                     >
                       {target.label}
+                      <span className="chat-tab-sub">{target.subtitle}</span>
                     </button>
                   ))}
                 </div>
@@ -3893,13 +3843,15 @@ function App() {
                     aria-label="Chat message"
                   />
                   <button type="button" className="chat-send" onClick={sendChat}>
-                    Send
+                    SEND
                   </button>
                 </div>
               </div>
+              {renderInspoBoard()}
             </aside>
           </div>
-          <footer className="ide-statusbar">
+          <footer className="ide-statusbar crt-statusbar">
+            <span className="led" />
             <span className="ide-status-item">
               {status.error
                 ? status.error

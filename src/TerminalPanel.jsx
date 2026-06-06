@@ -3,7 +3,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 function matchPaths(fileSystem, prefix = "") {
   const norm = prefix.replace(/^\.\//, "").replace(/\/$/, "");
   const paths = Object.keys(fileSystem);
-  if (!norm) return paths.filter((p) => !p.includes("/")).concat(paths.filter((p) => p.includes("/")).map((p) => p.split("/")[0])).filter((v, i, a) => a.indexOf(v) === i).sort();
+  if (!norm) {
+    return paths
+      .filter((p) => !p.includes("/"))
+      .concat(paths.filter((p) => p.includes("/")).map((p) => p.split("/")[0]))
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort();
+  }
   return paths
     .filter((p) => p.startsWith(norm ? `${norm}/` : "") || p === norm)
     .map((p) => {
@@ -24,6 +30,23 @@ async function runLocalShell(command, runId) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Command failed");
+  return data.output || "";
+}
+
+async function runGitCommand(command, { githubRepo, fileSystem }) {
+  const res = await fetch("/api/terminal/git", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      command,
+      owner: githubRepo?.owner,
+      repoName: githubRepo?.name,
+      files: Object.keys(fileSystem),
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Git command failed");
   return data.output || "";
 }
 
@@ -71,10 +94,14 @@ export default function TerminalPanel({
               "cat <file>    — print file contents",
               "open <file>   — open file in editor",
               "pwd           — workspace root",
+              "git status    — workspace + linked repo status",
+              "git log       — recent commits on GitHub",
+              "git branch    — current branch",
+              "git remote -v — remote URLs",
               githubRepo ? `repo          — ${githubRepo.fullName}` : "",
               cloudMode
-                ? "Shell (npm/node/git) — run locally with npm run dev"
-                : "npm/node/git  — run on server (local dev only)",
+                ? "npm/node      — local dev only (npm run dev)"
+                : "npm/node      — run on server (local dev)",
             ]
               .filter(Boolean)
               .join("\n")
@@ -138,11 +165,18 @@ export default function TerminalPanel({
           return;
         }
 
-        if (/^(npm|node|npx|git|echo|which)\b/.test(lower)) {
+        if (lower === "git") {
+          setBusy(true);
+          const output = await runGitCommand(line, { githubRepo, fileSystem });
+          append("output", output || "(no output)");
+          return;
+        }
+
+        if (/^(npm|node|npx|echo|which)\b/.test(lower)) {
           if (cloudMode) {
             append(
               "error",
-              "Shell commands are not available on the cloud deploy. Run `npm run dev` locally for a full terminal."
+              "npm/node are not available on cloud deploy. Run `npm run dev` locally for a full shell."
             );
             return;
           }
