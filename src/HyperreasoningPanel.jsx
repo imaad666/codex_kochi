@@ -54,6 +54,21 @@ function BranchCard({ branch, winnerId, maxScore, compact = false }) {
         <span>{branch.stepCount ?? "?"} steps</span>
         <span>{branch.agentsUsed ?? "?"} agents</span>
       </div>
+      {branch.rationale ? <p className="hr-rationale">{branch.rationale}</p> : null}
+      {Array.isArray(branch.factors) && branch.factors.length ? (
+        <ul className="hr-factors">
+          {branch.factors.map((factor) => (
+            <li key={factor.key || factor.label}>
+              <span className={factor.delta >= 0 ? "pos" : "neg"}>
+                {factor.delta >= 0 ? "+" : ""}
+                {factor.delta}
+              </span>{" "}
+              {factor.label}
+              {factor.detail ? ` — ${factor.detail}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {branch.pruneReason ? <p className="hr-prune-reason">{branch.pruneReason}</p> : null}
     </div>
   );
@@ -69,7 +84,7 @@ export default function HyperreasoningPanel({
   agentCount = 0,
 }) {
   const isSearching = phase === "searching";
-  const [expanded, setExpanded] = useState(isSearching);
+  const [expanded, setExpanded] = useState(true);
 
   const branchRows = useMemo(() => {
     const byId = new Map(comparisons.map((row) => [row.id, row]));
@@ -91,9 +106,8 @@ export default function HyperreasoningPanel({
   }, [branches, comparisons]);
 
   useEffect(() => {
-    if (isSearching) setExpanded(true);
-    else if (phase === "executing") setExpanded(false);
-  }, [isSearching, phase]);
+    if (isSearching || branchRows.length > 0) setExpanded(true);
+  }, [isSearching, branchRows.length]);
 
   const maxScore = useMemo(
     () => Math.max(1, ...branchRows.map((branch) => branch.score || 0)),
@@ -154,14 +168,14 @@ export default function HyperreasoningPanel({
       ) : null}
 
       {showDetails && branchRows.length > 0 ? (
-        <div className={`hr-branches ${isSearching ? "" : "compact-row"}`}>
+        <div className="hr-branches">
           {branchRows.map((branch) => (
             <BranchCard
               key={branch.id}
               branch={branch}
               winnerId={winnerId}
               maxScore={maxScore}
-              compact={!isSearching}
+              compact={false}
             />
           ))}
         </div>

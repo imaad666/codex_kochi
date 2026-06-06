@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import { streamSwarmGenerate, searchInspiration as fetchInspiration, postChat, syncSession } from "./eventClient.js";
-import Editor from "@monaco-editor/react";
+import CodeEditor, { codeEditorCss } from "./CodeEditor.jsx";
 import {
   ReactFlow,
   Background,
@@ -172,21 +172,23 @@ function truncateGraphText(text, max = 88) {
 }
 
 function estimatePlanNodeSize(data) {
-  const width = data.isRoot ? 212 : 196;
-  let height = data.isRoot ? 96 : 84;
-  if (data.prompt) height += 38;
-  if (data.branchPrompt) height += 34;
-  if (data.shortSummary) height += 16;
-  if (data.score != null) height += 24;
-  if (data.stepCount != null) height += 16;
-  return { width, height: Math.min(height, data.isRoot ? 168 : 152) };
+  const width = data.isRoot ? 220 : 240;
+  let height = data.isRoot ? 100 : 96;
+  if (data.prompt) height += Math.min(52, Math.ceil(String(data.prompt).length / 28) * 12);
+  if (data.branchPrompt) height += Math.min(48, Math.ceil(String(data.branchPrompt).length / 26) * 11);
+  if (data.shortSummary) height += 18;
+  if (data.score != null) height += 26;
+  if (data.stepCount != null) height += 18;
+  return { width, height: Math.min(height, data.isRoot ? 190 : 210) };
 }
 
 function estimateExecNodeSize(data) {
-  const width = data.isSubagent ? 168 : 184;
-  let height = 78;
-  if (data.branchPrompt || data.description) height += 32;
-  return { width, height };
+  const width = data.isSubagent ? 176 : 196;
+  let height = 88;
+  if (data.branchPrompt || data.description) {
+    height += Math.min(44, Math.ceil(String(data.branchPrompt || data.description).length / 24) * 11);
+  }
+  return { width, height: Math.min(height, 148) };
 }
 
 function graphEdge(active, { bridge = false, dim = false } = {}) {
@@ -252,10 +254,10 @@ function layoutSearchGraph(rawNodes, rawEdges, bestPath = [], rankdir = "LR") {
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir,
-    nodesep: rankdir === "LR" ? 56 : 64,
-    ranksep: rankdir === "LR" ? 120 : 90,
-    marginx: 24,
-    marginy: 24,
+    nodesep: rankdir === "LR" ? 96 : 80,
+    ranksep: rankdir === "LR" ? 180 : 120,
+    marginx: 40,
+    marginy: 40,
   });
   nodes.forEach((n) => {
     const size = estimatePlanNodeSize(n.data);
@@ -316,10 +318,10 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir,
-    nodesep: rankdir === "LR" ? 48 : 56,
-    ranksep: rankdir === "LR" ? 100 : 72,
-    marginx: 20,
-    marginy: 20,
+    nodesep: rankdir === "LR" ? 88 : 96,
+    ranksep: rankdir === "LR" ? 140 : 120,
+    marginx: 36,
+    marginy: 36,
   });
   nodes.forEach((n) => g.setNode(n.id, estimateExecNodeSize(n.data)));
   edges.forEach((e) => g.setEdge(e.source, e.target));
@@ -363,7 +365,7 @@ function layoutSubagentNodes(subagents, execNodes) {
     list.forEach((sa, index) => {
       const status =
         sa.status === "complete" ? "complete" : sa.status === "running" ? "running" : "ready";
-      const spread = (index - (list.length - 1) / 2) * 112;
+      const spread = (index - (list.length - 1) / 2) * 148;
       nodes.push({
         id: sa.id,
         type: "execStep",
@@ -376,7 +378,7 @@ function layoutSubagentNodes(subagents, execNodes) {
         },
         position: {
           x: parent.position.x + spread,
-          y: parent.position.y + 108,
+          y: parent.position.y + 136,
         },
         style: { background: "transparent", border: "none", padding: 0 },
       });
@@ -412,7 +414,7 @@ function layoutMegaGraph({
     };
   }
 
-  const execLaidRaw = layoutGraph(planSteps, agentStatus, stepStatus, "LR");
+  const execLaidRaw = layoutGraph(planSteps, agentStatus, stepStatus, "TB");
   const execLaid = prefixExecGraph(execLaidRaw);
 
   let maxX = 0;
@@ -425,7 +427,7 @@ function layoutMegaGraph({
     maxY = Math.max(maxY, node.position.y + size.height);
   }
 
-  const offsetX = maxX + 180;
+  const offsetX = maxX + 300;
   const centerY = searchLaid.nodes.length ? (minY + maxY) / 2 : 0;
 
   let execMinY = Infinity;
@@ -1073,16 +1075,16 @@ function App() {
           "system",
           `Loaded ${count} file(s) from GitHub (${data.branch || "main"})${truncatedNote}.`
         );
-      } else {
-        const stats = data.stats
-          ? ` — ${data.stats.candidates} candidates, ${data.stats.treeEntries} tree entries`
-          : "";
-        appendChat(
-          "system",
-          `No importable source files found on ${data.branch || "main"}${stats}. Build artifacts in public/ are skipped.`
-        );
+        return { count, files: next };
       }
-      return count;
+      const stats = data.stats
+        ? ` — ${data.stats.candidates} candidates, ${data.stats.treeEntries} tree entries`
+        : "";
+      appendChat(
+        "system",
+        `No importable source files found on ${data.branch || "main"}${stats}. Build artifacts in public/ are skipped.`
+      );
+      return { count: 0, files: null };
     },
     [appendChat, authUser?.login]
   );
@@ -1100,7 +1102,8 @@ function App() {
       }
       setRepoBusy(true);
       try {
-        return await loadRepoIntoWorkspace(githubRepo, { force });
+        const result = await loadRepoIntoWorkspace(githubRepo, { force });
+        return result?.count ?? 0;
       } catch (error) {
         appendChat("system", error.message || "GitHub import failed");
         return 0;
@@ -1112,19 +1115,23 @@ function App() {
   );
 
   const ensureRepoInWorkspace = useCallback(
-    async (repo = githubRepo) => {
+    async (repo = githubRepo, { force = false } = {}) => {
       const normalized = parseRepoIdentity(repo, authUser?.login);
-      if (!normalized.owner || !normalized.name) return 0;
-      if ((normalized.source || "existing") === "created") return 0;
-      if (Object.keys(fileSystem).length > 0) return Object.keys(fileSystem).length;
+      if (!normalized.owner || !normalized.name) return { count: 0, files: null };
+      if ((normalized.source || "existing") === "created") return { count: 0, files: null };
+      if (!force && Object.keys(fileSystem).length > 0) {
+        return { count: Object.keys(fileSystem).length, files: fileSystem };
+      }
       const key = normalized.fullName || `${normalized.owner}/${normalized.name}`;
-      if (repoAutoLoadRef.current.has(key) || repoLoadInFlightRef.current === key) return 0;
+      if (!force && (repoAutoLoadRef.current.has(key) || repoLoadInFlightRef.current === key)) {
+        return { count: 0, files: null };
+      }
       repoLoadInFlightRef.current = key;
       try {
-        return await loadRepoIntoWorkspace(normalized);
+        return await loadRepoIntoWorkspace(normalized, { force });
       } catch (error) {
         appendChat("system", error.message || "Could not import repo into workspace");
-        return 0;
+        return { count: 0, files: null };
       } finally {
         if (repoLoadInFlightRef.current === key) repoLoadInFlightRef.current = null;
       }
@@ -1670,6 +1677,25 @@ function App() {
     setStatus((current) => ({ ...current, error: "", runPath: "" }));
   }, [setNodes, setEdges]);
 
+  const updateEditorContent = useCallback(
+    (code) => {
+      if (!activeFile) return;
+      setFileSystem((current) => {
+        const entry = current[activeFile];
+        if (!entry) return current;
+        return {
+          ...current,
+          [activeFile]: {
+            ...entry,
+            code,
+            status: entry.status === "writing" ? "writing" : "edited",
+          },
+        };
+      });
+    },
+    [activeFile]
+  );
+
   const deleteWorkspaceFile = useCallback(
     (filePath) => {
       if (!filePath || !fileSystem[filePath]) return;
@@ -1744,10 +1770,28 @@ function App() {
       }
 
       setStage("ide");
+      let workspaceFiles = fileSystem;
+
       if (resetWorkspace) {
+        if (githubRepo?.fullName) repoAutoLoadRef.current.delete(githubRepo.fullName);
         setFileSystem({});
         setActiveFile(null);
+        workspaceFiles = {};
+
+        const source = githubRepo?.source || "existing";
+        if (githubRepo && authUser?.authenticated && source !== "created") {
+          const imported = await loadRepoIntoWorkspace(githubRepo, { force: true });
+          if (imported.files) workspaceFiles = imported.files;
+        }
+      } else if (
+        Object.keys(workspaceFiles).length === 0 &&
+        githubRepo &&
+        authUser?.authenticated
+      ) {
+        const imported = await ensureRepoInWorkspace(githubRepo, { force: true });
+        if (imported.files) workspaceFiles = imported.files;
       }
+
       setRunningAgents([]);
       setSearchPhase("searching");
       setBottomPanelTab("graph");
@@ -1771,11 +1815,10 @@ function App() {
       setEdges([]);
       setStatus((current) => ({ ...current, error: "" }));
 
-      const fileNames = Object.keys(fileSystem);
-      const swarmPrompt =
-        !resetWorkspace && fileNames.length
-          ? `Existing project files: ${fileNames.join(", ")}\n\nChange request: ${raw}`
-          : raw;
+      const fileNames = Object.keys(workspaceFiles);
+      const swarmPrompt = fileNames.length
+        ? `Existing project files: ${fileNames.join(", ")}\n\nChange request: ${raw}`
+        : raw;
 
       if (resetWorkspace) setPrompt(raw);
 
@@ -1811,12 +1854,16 @@ function App() {
       runningAgents.length,
       selected,
       fileSystem,
+      githubRepo,
+      authUser,
       inspoCandidates,
       inspoSelectedIds,
       attachments,
       sessionId,
       appendChat,
       swarmHandlers,
+      loadRepoIntoWorkspace,
+      ensureRepoInWorkspace,
     ]
   );
 
@@ -1835,7 +1882,7 @@ function App() {
 
     if (intent?.type === "clear-workspace") {
       clearWorkspace();
-      if (githubRepo?.fullName) repoAutoLoadRef.current.add(githubRepo.fullName);
+      if (githubRepo?.fullName) repoAutoLoadRef.current.delete(githubRepo.fullName);
       appendChat("controller", CLEAR_WORKSPACE_REPLY);
       return;
     }
@@ -2127,20 +2174,6 @@ function App() {
     .monitor * {
       scrollbar-width: thin;
       scrollbar-color: ${CRT.textDim} #133f3f99;
-    }
-    .monaco-editor .scrollbar .slider {
-      background: ${CRT.textDim} !important;
-      border: 1px solid ${CRT.screenEdge} !important;
-      border-radius: 0 !important;
-    }
-    .monaco-editor .scrollbar .slider:hover {
-      background: ${CRT.textSoft} !important;
-    }
-    .monaco-editor .scrollbar.vertical {
-      width: 10px !important;
-    }
-    .monaco-editor .scrollbar.horizontal {
-      height: 10px !important;
     }
     input, button { font-family: inherit; }
     .viewport {
@@ -2514,6 +2547,7 @@ function App() {
     @keyframes pulse { 50% { opacity: 0.6; } }
     ${introCss}
     ${flowNodeCss}
+    ${codeEditorCss}
     .ide {
       flex: 1;
       display: flex;
@@ -2679,8 +2713,8 @@ function App() {
       overflow: hidden;
     }
     .graph-panel-stack .graph-canvas {
-      flex: 1.4;
-      min-height: 180px;
+      flex: 1;
+      min-height: 220px;
     }
     .hyper-panel.compact {
       flex-shrink: 0;
@@ -3379,8 +3413,9 @@ function App() {
     }
     .hyper-panel.compact .hr-header { border-bottom: 0; }
     .hyper-panel.expanded {
-      max-height: 180px;
+      max-height: min(320px, 42vh);
       overflow: auto;
+      flex-shrink: 0;
     }
     .hr-header {
       display: flex;
@@ -3497,8 +3532,8 @@ function App() {
     .hr-branches {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 6px;
-      padding: 6px 8px;
+      gap: 10px;
+      padding: 8px 10px 10px;
     }
     .hr-branches.compact-row {
       display: flex;
@@ -3521,9 +3556,9 @@ function App() {
     .hr-branch-compact.pruned { opacity: 0.55; }
     .hr-branch-compact .hr-branch-title { flex: 1; min-width: 0; }
     .hr-branch {
-      padding: 7px 8px;
+      padding: 9px 10px;
       border: 1px solid #2a4040;
-      border-radius: 4px;
+      border-radius: 6px;
       background: #101818;
       min-width: 0;
     }
@@ -4438,19 +4473,11 @@ function App() {
                   )}
                 </div>
                 <div className="editor">
-                  <Editor
-                    theme="vs-dark"
-                    language={languageForFile(activeFile)}
-                    value={activeFileEntry?.code || "// Open a repo or run a swarm to load files"}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      fontFamily: "VT323, monospace",
-                      lineNumbers: "on",
-                      readOnly: true,
-                      scrollBeyondLastLine: false,
-                      padding: { top: 8 },
-                    }}
+                  <CodeEditor
+                    value={activeFileEntry?.code || ""}
+                    onChange={updateEditorContent}
+                    readOnly={!activeFile || activeFileEntry?.status === "writing"}
+                    placeholder="// Open a repo or run a swarm to load files"
                   />
                 </div>
               </section>
