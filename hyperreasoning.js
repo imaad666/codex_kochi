@@ -1,4 +1,4 @@
-import { GroqError, estimateTokens, groqConfig, groqJson } from "./groq.js";
+import { GroqError, agentGroqConfig, estimateTokens, groqJson } from "./groq.js";
 import { attachmentContent, controllerPrompt } from "./agents.js";
 
 export const CANDIDATES_SCHEMA = {
@@ -219,11 +219,13 @@ function formatStrategy(strategy = "") {
 }
 
 async function fetchCandidates(intent, agents, attachments) {
-  const { plannerModel } = groqConfig();
+  const provider = agentGroqConfig("altbot");
   const result = await groqJson({
     name: "open_ide_hyper_candidates",
     schema: CANDIDATES_SCHEMA,
-    model: plannerModel,
+    model: provider.model,
+    apiKey: provider.apiKey,
+    agentKey: "altbot",
     temperature: 0.25,
     system: [
       "You are a hyperreasoning controller.",

@@ -33,7 +33,7 @@ import {
   selectedAgents,
   workerPrompt,
 } from "./agents.js";
-import { GroqError, groqConfig, groqJson, groqText } from "./groq.js";
+import { GroqError, agentGroqConfig, groqConfig, groqJson, groqText } from "./groq.js";
 import { runHyperreasoning } from "./hyperreasoning.js";
 import { searchInspiration } from "./inspo-agent.js";
 import { createSessionId, loadSession, saveSession } from "./sessions.js";
@@ -202,7 +202,7 @@ function parseWorkerText(text, agent) {
 }
 
 async function runAgent({ intent, plan, agent, attachments, sharedContext = "" }) {
-  const { workerModel } = groqConfig();
+  const provider = agentGroqConfig(agent.title);
   const user = attachmentContent(
     workerPrompt({ intent, plan, agent, attachments, sharedContext }),
     attachments,
@@ -224,7 +224,9 @@ async function runAgent({ intent, plan, agent, attachments, sharedContext = "" }
       const text = await groqText({
         system,
         user,
-        model: workerModel,
+        model: provider.model,
+        apiKey: provider.apiKey,
+        agentKey: agent.title,
         maxTokens: 1600,
         temperature: 0.2 + attempt * 0.05,
       });
@@ -819,6 +821,7 @@ async function handleChatSend({ message, target = "altbot", context = {} }) {
     .slice(0, 3000);
 
   try {
+    const provider = agentGroqConfig(isAgent ? agentName : "altbot");
     const reply = await groqText({
       system: isAgent ? agentChatSystem(agentName) : ALTBOT_CHAT_SYSTEM,
       user: [
@@ -837,6 +840,9 @@ async function handleChatSend({ message, target = "altbot", context = {} }) {
         .join("\n\n"),
       maxTokens: 220,
       temperature: 0.4,
+      model: provider.model,
+      apiKey: provider.apiKey,
+      agentKey: isAgent ? agentName : "altbot",
     });
     return { role: replyRole, agent: replyAgent, text: reply };
   } catch (error) {

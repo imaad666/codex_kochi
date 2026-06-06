@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { groqConfig, groqJson, GroqError } from "./groq.js";
+import { agentGroqConfig, groqJson, GroqError } from "./groq.js";
 
 const QUERY_SCHEMA = {
   type: "object",
@@ -21,11 +21,13 @@ function imageId(url) {
 }
 
 async function groqSearchQueries(prompt) {
-  const { plannerModel } = groqConfig();
+  const provider = agentGroqConfig("altbot");
   const result = await groqJson({
     name: "open_ide_inspo_queries",
     schema: QUERY_SCHEMA,
-    model: plannerModel,
+    model: provider.model,
+    apiKey: provider.apiKey,
+    agentKey: "altbot",
     temperature: 0.4,
     system:
       "You are SurfAgent, a visual inspiration scout. Return short image search queries (2-4 words each) for UI/product inspiration based on the user's build prompt.",

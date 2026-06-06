@@ -10,6 +10,14 @@ export class GroqError extends Error {
   }
 }
 
+const AGENT_ENV_KEYS = {
+  altbot: "ALTBOT",
+  Altbot: "ALTBOT",
+  Frontend: "FRONTEND",
+  Backend: "BACKEND",
+  Database: "DATABASE",
+};
+
 export function groqConfig() {
   const fallback = process.env.GROQ_MODEL || DEFAULT_PLANNER;
   return {
@@ -20,6 +28,21 @@ export function groqConfig() {
     requestCharBudget: Number(process.env.GROQ_REQUEST_CHAR_BUDGET || 7000),
     tpmSafeTotal: Number(process.env.GROQ_TPM_SAFE_TOTAL || 5500),
     minGapMs: Number(process.env.GROQ_MIN_GAP_MS || 700),
+  };
+}
+
+/** Per-card provider config — optional GROQ_{ALTBOT|FRONTEND|BACKEND|DATABASE}_{API_KEY,MODEL}. */
+export function agentGroqConfig(agentKey = "altbot") {
+  const global = groqConfig();
+  const envPrefix = AGENT_ENV_KEYS[agentKey] || String(agentKey || "ALTBOT").toUpperCase();
+  const perKey = process.env[`GROQ_${envPrefix}_API_KEY`] || "";
+  const perModel = process.env[`GROQ_${envPrefix}_MODEL`] || "";
+  const isPlanner = envPrefix === "ALTBOT";
+  return {
+    ...global,
+    agentKey: envPrefix,
+    apiKey: perKey || global.apiKey,
+    model: perModel || (isPlanner ? global.plannerModel : global.workerModel),
   };
 }
 
@@ -105,8 +128,19 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function groqJson({ name, schema, system, user, temperature = 0.2, model: modelOverride }) {
-  const { apiKey, model } = groqConfig();
+export async function groqJson({
+  name,
+  schema,
+  system,
+  user,
+  temperature = 0.2,
+  model: modelOverride,
+  apiKey: apiKeyOverride,
+  agentKey,
+}) {
+  const provider = agentKey ? agentGroqConfig(agentKey) : groqConfig();
+  const apiKey = apiKeyOverride || provider.apiKey;
+  const model = modelOverride || provider.model || provider.plannerModel;
   if (!apiKey) {
     throw new GroqError("GROQ_API_KEY is not configured");
   }
@@ -132,7 +166,7 @@ export async function groqJson({ name, schema, system, user, temperature = 0.2, 
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: modelOverride || model,
+      model,
       temperature,
       messages: [
         { role: "system", content: systemWithSchema },
@@ -213,8 +247,19 @@ export async function groqWorkerJson({
   throw lastError || new GroqError("Worker generation failed");
 }
 
-export async function groqText({ system, user, temperature = 0.35, model: modelOverride, maxTokens = 500 }) {
-  const { apiKey, plannerModel, maxOutputTokens, requestCharBudget } = groqConfig();
+export async function groqText({
+  system,
+  user,
+  temperature = 0.35,
+  model: modelOverride,
+  maxTokens = 500,
+  apiKey: apiKeyOverride,
+  agentKey,
+}) {
+  const provider = agentKey ? agentGroqConfig(agentKey) : groqConfig();
+  const apiKey = apiKeyOverride || provider.apiKey;
+  const model = modelOverride || provider.model || provider.plannerModel;
+  const { maxOutputTokens, requestCharBudget } = provider;
   if (!apiKey) {
     throw new GroqError("GROQ_API_KEY is not configured");
   }
@@ -236,7 +281,7 @@ export async function groqText({ system, user, temperature = 0.35, model: modelO
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: modelOverride || plannerModel,
+      model,
       temperature,
       max_tokens: cappedOutput,
       messages: [
