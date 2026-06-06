@@ -83,37 +83,10 @@ function CyclingTagline() {
   );
 }
 
-function AnimatedStat({ stat, index, active }) {
-  const [display, setDisplay] = useState("0");
-  const numeric = /^(\d+)/.exec(stat.value);
-  const suffix = numeric ? stat.value.slice(numeric[0].length) : "";
-  const target = numeric ? Number(numeric[1]) : null;
-
-  useEffect(() => {
-    if (!active || target === null) {
-      setDisplay(stat.value);
-      return undefined;
-    }
-    let frame = 0;
-    const total = 28;
-    const timer = setInterval(() => {
-      frame += 1;
-      const progress = frame / total;
-      const eased = 1 - (1 - progress) ** 3;
-      setDisplay(String(Math.round(target * eased)));
-      if (frame >= total) clearInterval(timer);
-    }, 32);
-    return () => clearInterval(timer);
-  }, [active, target, stat.value]);
-
+function AnimatedStat({ stat }) {
   return (
-    <div
-      className="intro-stat intro-reveal visible"
-      style={{ animationDelay: `${0.55 + index * 0.12}s` }}
-    >
-      <span className="intro-stat-value">
-        {target !== null ? `${display}${suffix}` : stat.value}
-      </span>
+    <div className="intro-stat">
+      <span className="intro-stat-value">{stat.value}</span>
       <span className="intro-stat-label">{stat.label}</span>
     </div>
   );
@@ -177,27 +150,31 @@ export const introCss = `
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 1.25rem 3rem 1.25rem 1.25rem;
+    padding: 0.5rem 2.75rem 0.5rem 0.75rem;
     position: relative;
     overflow: hidden;
   }
   .intro-slide-inner {
     width: 100%;
-    max-width: 1100px;
+    max-width: 920px;
+    height: 100%;
     max-height: 100%;
-    overflow-y: auto;
+    overflow: hidden;
     position: relative;
     z-index: 2;
-  }
-  .intro-slide.cards-slide {
-    align-items: stretch;
-    padding: 1rem 3.25rem 1rem 1rem;
-  }
-  .intro-slide.cards-slide .intro-slide-inner {
-    max-width: none;
     display: flex;
     flex-direction: column;
+    align-items: center;
     justify-content: center;
+    margin: 0 auto;
+  }
+  .intro-slide.cards-slide {
+    padding: 0.5rem 2.75rem 0.5rem 0.75rem;
+  }
+  .intro-slide.cards-slide .intro-slide-inner {
+    max-width: min(100%, 980px);
+    justify-content: center;
+    gap: 0.5rem;
   }
   .intro-nav {
     position: absolute;
@@ -306,7 +283,18 @@ export const introCss = `
     transform: translateY(0);
   }
 
-  .intro-hero { text-align: center; position: relative; }
+  .intro-hero {
+    text-align: center;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(0.35rem, 1.2vh, 0.75rem);
+    padding: 0.25rem 0;
+  }
   .intro-hero-bg {
     position: absolute;
     inset: -20% -10%;
@@ -357,256 +345,215 @@ export const introCss = `
 
   .intro-hero-logo-wrap {
     position: relative;
-    display: inline-block;
-    margin: 0 auto 1.5rem;
-    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    flex-shrink: 0;
   }
   .intro-hero-logo-wrap::before {
     content: "";
     position: absolute;
-    inset: -20%;
+    inset: -12%;
     border-radius: 50%;
-    background: radial-gradient(circle, ${CRT.text}33 0%, transparent 70%);
-    animation: intro-logo-glow 3s ease-in-out infinite;
+    background: radial-gradient(circle, ${CRT.text}22 0%, transparent 70%);
     z-index: -1;
-  }
-  @keyframes intro-logo-glow {
-    0%, 100% { opacity: 0.5; transform: scale(0.95); }
-    50% { opacity: 1; transform: scale(1.08); }
-  }
-  @keyframes intro-hero-in {
-    from { opacity: 0; transform: translateY(20px) scale(0.92); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    pointer-events: none;
   }
   .intro-hero-logo {
-    width: min(168px, 38vw);
-    height: auto;
+    width: clamp(72px, 14vh, 112px);
+    height: clamp(72px, 14vh, 112px);
+    object-fit: cover;
     display: block;
     border-radius: 6px;
-    box-shadow: 0 8px 32px #00000055, 0 0 40px ${CRT.text}22;
-    animation: intro-logo-float 4s ease-in-out infinite;
-  }
-  @keyframes intro-logo-float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
-  }
-
-  .intro-kicker {
-    display: inline-block;
-    margin-bottom: 1rem;
-    padding: 6px 16px;
-    border: 2px solid ${CRT.textDim};
-    color: ${CRT.text};
-    font-size: 20px;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
-  }
-  .intro-kicker-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    margin-right: 10px;
-    border-radius: 50%;
-    background: ${CRT.led};
-    box-shadow: 0 0 10px ${CRT.led};
-    vertical-align: middle;
-    animation: intro-led-blink 1.4s ease-in-out infinite;
-  }
-  @keyframes intro-led-blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
+    box-shadow: 0 6px 24px #00000055, 0 0 24px ${CRT.text}18;
   }
 
   .intro-hero h1 {
     margin: 0;
     color: ${CRT.textSoft};
-    font-size: clamp(52px, 10vw, 96px);
-    letter-spacing: 6px;
-    line-height: 0.92;
-    text-shadow: 0 0 28px #dfff3f55, 3px 3px 0 #0005;
+    font-size: clamp(36px, 7.5vh, 68px);
+    letter-spacing: clamp(3px, 0.8vw, 6px);
+    line-height: 0.95;
+    text-shadow: 0 0 20px #dfff3f44, 2px 2px 0 #0005;
     text-transform: uppercase;
-    animation: intro-title-in 1s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both,
-      intro-title-glow 4s ease-in-out 1.2s infinite;
-    position: relative;
-  }
-  @keyframes intro-title-in {
-    from { opacity: 0; transform: translateY(24px); letter-spacing: 14px; }
-    to { opacity: 1; transform: translateY(0); letter-spacing: 6px; }
-  }
-  @keyframes intro-title-glow {
-    0%, 100% { text-shadow: 0 0 28px #dfff3f55, 3px 3px 0 #0005; }
-    50% { text-shadow: 0 0 48px #dfff3f88, 0 0 80px #dfff3f33, 3px 3px 0 #0005; }
+    flex-shrink: 0;
   }
 
   .intro-tagline {
-    margin: 1.25rem auto 0;
-    max-width: 780px;
+    margin: 0;
+    max-width: min(680px, 92vw);
     color: ${CRT.textSoft};
-    font-size: clamp(26px, 4vw, 38px);
+    font-size: clamp(16px, 2.6vh, 24px);
     line-height: 1.25;
-    letter-spacing: 1px;
-    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
   }
   .intro-tagline-verb {
     display: inline-block;
     color: ${CRT.text};
-    text-shadow: 0 0 16px ${CRT.text}66;
-    min-width: 5.5ch;
-    text-align: left;
-    transition: opacity 0.28s ease, transform 0.28s ease;
+    text-shadow: 0 0 12px ${CRT.text}44;
+    min-width: 9.5ch;
+    text-align: center;
+    transition: opacity 0.28s ease;
   }
-  .intro-tagline-verb.in {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  .intro-tagline-verb.out {
-    opacity: 0;
-    transform: translateY(8px);
-  }
+  .intro-tagline-verb.in { opacity: 1; }
+  .intro-tagline-verb.out { opacity: 0; }
 
   .intro-lead {
-    margin: 1.5rem auto 0;
-    max-width: 820px;
+    margin: 0;
+    max-width: min(640px, 92vw);
     color: ${CRT.text};
-    font-size: clamp(22px, 3vw, 28px);
-    line-height: 1.45;
-    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.42s both;
+    font-size: clamp(13px, 1.9vh, 17px);
+    line-height: 1.4;
+    flex-shrink: 1;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
   }
   .intro-hero-actions {
-    margin-top: 2rem;
+    margin: 0;
     display: flex;
-    gap: 1rem;
+    gap: 0.75rem;
     justify-content: center;
     flex-wrap: wrap;
-    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.54s both;
+    flex-shrink: 0;
   }
   .intro-btn-primary {
-    padding: 14px 32px;
-    border: 3px solid ${CRT.text};
+    padding: 10px 22px;
+    border: 2px solid ${CRT.text};
     background: linear-gradient(180deg, #1a5050, #133f3f);
     color: ${CRT.textSoft};
     font: inherit;
-    font-size: clamp(26px, 4vw, 34px);
+    font-size: clamp(16px, 2.4vh, 22px);
     text-transform: uppercase;
     cursor: pointer;
-    box-shadow: 0 0 24px ${CRT.text}33;
-    letter-spacing: 2px;
+    box-shadow: 0 0 16px ${CRT.text}28;
+    letter-spacing: 1px;
     position: relative;
     overflow: hidden;
-    transition: transform 0.2s, color 0.2s, box-shadow 0.2s;
-    animation: intro-btn-pulse 2.8s ease-in-out infinite;
+    transition: color 0.2s, box-shadow 0.2s;
   }
   @keyframes intro-btn-pulse {
-    0%, 100% { box-shadow: 0 0 24px ${CRT.text}33; }
-    50% { box-shadow: 0 0 36px ${CRT.text}55, 0 0 60px ${CRT.text}22; }
+    0%, 100% { box-shadow: 0 0 16px ${CRT.text}28; }
+    50% { box-shadow: 0 0 24px ${CRT.text}44; }
   }
   .intro-btn-primary::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(105deg, transparent 40%, ${CRT.textSoft}22 50%, transparent 60%);
-    transform: translateX(-120%);
-    animation: intro-btn-shine 4s ease-in-out infinite;
-  }
-  @keyframes intro-btn-shine {
-    0%, 70%, 100% { transform: translateX(-120%); }
-    85% { transform: translateX(120%); }
+    display: none;
   }
   .intro-btn-primary:hover {
     color: #fff;
-    transform: translateY(-2px) scale(1.02);
-    box-shadow: 0 0 40px ${CRT.text}66;
+    box-shadow: 0 0 28px ${CRT.text}55;
   }
   .intro-btn-ghost {
-    padding: 14px 24px;
+    padding: 10px 18px;
     border: 2px solid #3a6868;
     background: transparent;
     color: ${CRT.textDim};
     font: inherit;
-    font-size: clamp(22px, 3vw, 28px);
+    font-size: clamp(14px, 2vh, 18px);
     text-transform: uppercase;
     cursor: pointer;
-    transition: border-color 0.2s, color 0.2s, transform 0.2s;
+    transition: border-color 0.2s, color 0.2s;
   }
   .intro-btn-ghost:hover {
     border-color: ${CRT.textDim};
     color: ${CRT.text};
-    transform: translateY(-2px);
   }
   .intro-stats {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1rem;
-    margin: 2.5rem 0 0;
-    padding: 1.5rem 0;
-    border-top: 2px solid #3a686866;
-    border-bottom: 2px solid #3a686866;
+    gap: 0.5rem;
+    margin: 0;
+    padding: clamp(0.4rem, 1vh, 0.65rem) 0 0;
+    border-top: 1px solid #3a686866;
+    width: 100%;
+    max-width: min(720px, 96vw);
+    flex-shrink: 0;
   }
-  .intro-stat { text-align: center; }
+  .intro-stat { text-align: center; min-width: 0; }
   .intro-stat-value {
     display: block;
     color: ${CRT.textSoft};
-    font-size: clamp(40px, 6vw, 56px);
+    font-size: clamp(22px, 3.5vh, 34px);
     line-height: 1;
-    text-shadow: 0 0 16px #dfff3f44;
+    text-shadow: 0 0 10px #dfff3f33;
+    white-space: nowrap;
   }
   .intro-stat-label {
     display: block;
-    margin-top: 8px;
+    margin-top: 4px;
     color: ${CRT.text};
-    font-size: clamp(16px, 2vw, 20px);
+    font-size: clamp(10px, 1.4vh, 13px);
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
+  .intro-manifesto {
+    width: 100%;
+    text-align: center;
+    overflow: hidden;
+  }
   .intro-manifesto h2 {
-    margin: 0 0 1.5rem;
+    margin: 0 0 clamp(0.5rem, 1.5vh, 1rem);
     color: ${CRT.textSoft};
-    font-size: clamp(32px, 5vw, 48px);
-    letter-spacing: 3px;
+    font-size: clamp(22px, 4vh, 36px);
+    letter-spacing: 2px;
     line-height: 1.1;
     text-transform: uppercase;
-    text-shadow: 0 0 14px #dfff3f44;
+    text-shadow: 0 0 10px #dfff3f33;
   }
   .intro-manifesto p {
-    margin: 0 0 1.25rem;
+    margin: 0 0 clamp(0.35rem, 1vh, 0.65rem);
     color: ${CRT.text};
-    font-size: clamp(22px, 2.8vw, 28px);
-    line-height: 1.5;
-    max-width: 900px;
+    font-size: clamp(12px, 1.8vh, 16px);
+    line-height: 1.45;
+    max-width: 100%;
+    text-align: center;
   }
-  .intro-section-head { margin-bottom: 1.5rem; text-align: center; }
+  .intro-section-head {
+    margin-bottom: clamp(0.35rem, 1vh, 0.65rem);
+    text-align: center;
+    width: 100%;
+    flex-shrink: 0;
+  }
   .intro-section-head h2 {
     margin: 0;
     color: ${CRT.textSoft};
-    font-size: clamp(36px, 5.5vw, 52px);
-    letter-spacing: 4px;
+    font-size: clamp(22px, 4vh, 34px);
+    letter-spacing: 2px;
     text-transform: uppercase;
-    text-shadow: 0 0 16px #dfff3f44;
+    text-shadow: 0 0 10px #dfff3f33;
   }
   .intro-section-head p {
-    margin: 0.75rem 0 0;
+    margin: 0.35rem 0 0;
     color: ${CRT.text};
-    font-size: clamp(22px, 3vw, 28px);
-    line-height: 1.35;
+    font-size: clamp(12px, 1.8vh, 16px);
+    line-height: 1.3;
   }
   .intro-cards-grid {
     width: 100%;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: clamp(0.65rem, 1.5vw, 1.25rem);
+    gap: clamp(0.35rem, 0.8vh, 0.6rem);
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+    align-content: center;
   }
   .intro-showcase-card {
     min-width: 0;
     display: flex;
     flex-direction: column;
     color: ${CRT.textDim};
-    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    min-height: 0;
   }
   .intro-showcase-card:hover {
-    transform: translateY(-8px) scale(1.02);
-    z-index: 2;
+    transform: none;
   }
   .intro-showcase-card .card-frame {
     display: block;
@@ -614,11 +561,11 @@ export const introCss = `
     overflow: hidden;
     width: 100%;
     border: 2px solid ${CRT.textDim};
-    border-radius: 14px;
+    border-radius: 10px;
     background: #00000024;
-    box-shadow: inset 0 0 18px #00000030;
+    box-shadow: inset 0 0 12px #00000030;
     aspect-ratio: 0.72;
-    transition: border-color 0.3s, box-shadow 0.3s;
+    max-height: 22vh;
   }
   .intro-showcase-card:hover .card-frame {
     border-color: ${CRT.text};
@@ -636,11 +583,6 @@ export const introCss = `
     object-fit: cover;
     object-position: center;
     filter: saturate(0.85) contrast(1.05);
-    transition: transform 0.5s ease, filter 0.3s;
-  }
-  .intro-showcase-card:hover .card-image {
-    transform: scale(1.06);
-    filter: saturate(1) contrast(1.08);
   }
   .intro-showcase-card.locked .card-image {
     filter: saturate(1) contrast(1.02);
@@ -660,142 +602,144 @@ export const introCss = `
   .intro-showcase-card .card-copy {
     display: block;
     flex: 1;
-    margin-top: 8px;
+    margin-top: 4px;
     min-height: 0;
-    padding: 10px 12px 12px;
+    padding: 6px 8px 8px;
     border: 2px solid ${CRT.textDim};
-    border-radius: 10px;
+    border-radius: 8px;
     background: #133f3fcc;
-    box-shadow: inset 0 0 14px #00000028;
+    box-shadow: inset 0 0 10px #00000028;
     text-transform: uppercase;
-    transition: border-color 0.3s, background 0.3s;
-  }
-  .intro-showcase-card:hover .card-copy {
-    border-color: ${CRT.textDim};
-    background: #1a5050dd;
+    overflow: hidden;
   }
   .intro-showcase-card .card-name {
     display: block;
     color: ${CRT.textSoft};
-    font-size: clamp(22px, 2.4vw, 30px);
+    font-size: clamp(14px, 2vh, 20px);
     line-height: 1;
-    text-shadow: 0 0 9px #dfff3f66;
+    text-shadow: 0 0 6px #dfff3f44;
   }
   .intro-showcase-card .card-role {
     display: block;
-    margin-top: 5px;
+    margin-top: 3px;
     color: ${CRT.text};
-    font-size: clamp(16px, 1.6vw, 20px);
-    letter-spacing: 1px;
+    font-size: clamp(11px, 1.4vh, 14px);
+    letter-spacing: 0.5px;
   }
   .intro-showcase-card .card-blurb {
-    display: block;
-    margin-top: 8px;
-    color: ${CRT.textSoft};
-    font-size: clamp(14px, 1.35vw, 17px);
-    line-height: 1.35;
-    text-transform: none;
+    display: none;
   }
-  .intro-flow-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .intro-flow-list {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.3rem, 0.7vh, 0.5rem);
+    width: 100%;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+    justify-content: center;
+  }
   .intro-flow-item {
     display: grid;
-    grid-template-columns: 64px 1fr;
-    gap: 1rem;
-    padding: 1rem 1.25rem;
-    border: 2px solid #3a686866;
-    border-radius: 8px;
+    grid-template-columns: 44px 1fr;
+    gap: 0.65rem;
+    padding: clamp(0.4rem, 1vh, 0.65rem) 0.75rem;
+    border: 1px solid #3a686866;
+    border-radius: 6px;
     background: #0a2222aa;
-    transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
   }
   .intro-flow-item:hover {
-    border-color: ${CRT.textDim};
-    transform: translateX(6px);
-    box-shadow: -4px 0 0 ${CRT.textDim}44;
+    transform: none;
+    box-shadow: none;
   }
   .intro-flow-item .step-num {
     color: ${CRT.led};
-    font-size: clamp(28px, 3.5vw, 36px);
+    font-size: clamp(18px, 2.8vh, 24px);
     font-weight: bold;
     line-height: 1;
   }
   .intro-flow-item h3 {
     margin: 0;
     color: ${CRT.textSoft};
-    font-size: clamp(22px, 3vw, 28px);
+    font-size: clamp(13px, 2vh, 17px);
     text-transform: uppercase;
   }
   .intro-flow-item p {
-    margin: 0.4rem 0 0;
+    margin: 0.2rem 0 0;
     color: ${CRT.text};
-    font-size: clamp(18px, 2.2vw, 22px);
-    line-height: 1.4;
+    font-size: clamp(11px, 1.5vh, 14px);
+    line-height: 1.35;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
   .intro-features-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
+    gap: clamp(0.35rem, 0.8vh, 0.55rem);
+    width: 100%;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+    align-content: center;
   }
   .intro-feature-block {
-    padding: 1rem 1.25rem;
-    border-left: 4px solid ${CRT.textDim};
+    padding: clamp(0.4rem, 1vh, 0.65rem) 0.75rem;
+    border-left: 3px solid ${CRT.textDim};
     background: #08181899;
-    transition: border-color 0.3s, transform 0.3s, background 0.3s;
+    overflow: hidden;
   }
   .intro-feature-block:hover {
-    border-left-color: ${CRT.textSoft};
-    background: #0d2828cc;
-    transform: translateY(-4px);
+    transform: none;
   }
   .intro-feature-block .tag {
     display: block;
     color: ${CRT.led};
-    font-size: 16px;
-    letter-spacing: 3px;
-    margin-bottom: 6px;
+    font-size: clamp(10px, 1.3vh, 12px);
+    letter-spacing: 2px;
+    margin-bottom: 3px;
   }
   .intro-feature-block h3 {
     margin: 0;
     color: ${CRT.textSoft};
-    font-size: clamp(22px, 2.8vw, 26px);
+    font-size: clamp(13px, 2vh, 16px);
     text-transform: uppercase;
   }
   .intro-feature-block p {
-    margin: 0.5rem 0 0;
+    margin: 0.25rem 0 0;
     color: ${CRT.text};
-    font-size: clamp(17px, 2vw, 20px);
-    line-height: 1.4;
+    font-size: clamp(11px, 1.5vh, 13px);
+    line-height: 1.35;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
-  .intro-final { text-align: center; }
+  .intro-final {
+    text-align: center;
+    width: 100%;
+  }
   .intro-final h2 {
-    margin: 0 0 1rem;
+    margin: 0 0 0.65rem;
     color: ${CRT.textSoft};
-    font-size: clamp(36px, 5vw, 52px);
-    letter-spacing: 4px;
+    font-size: clamp(24px, 4.5vh, 38px);
+    letter-spacing: 2px;
     text-transform: uppercase;
-    animation: intro-title-glow 4s ease-in-out infinite;
   }
   .intro-final p {
-    margin: 0 auto 2rem;
-    max-width: 700px;
+    margin: 0 auto 1rem;
+    max-width: min(560px, 92vw);
     color: ${CRT.text};
-    font-size: clamp(22px, 3vw, 28px);
+    font-size: clamp(13px, 2vh, 17px);
     line-height: 1.4;
   }
   .intro-final .intro-btn-primary {
-    animation: intro-btn-pulse 2s ease-in-out infinite, intro-hero-in 0.9s both;
+    animation: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .intro-reveal,
-    .intro-hero-logo,
-    .intro-hero-logo-wrap,
-    .intro-hero h1,
-    .intro-kicker,
-    .intro-tagline,
-    .intro-lead,
-    .intro-hero-actions,
-    .intro-btn-primary,
-    .intro-final h2,
     .intro-hero-grid,
     .intro-hero-scan,
     .intro-hero-dot,
@@ -869,15 +813,6 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
       if (wheelLock.current) return;
       const delta = event.deltaY;
       if (Math.abs(delta) < 28) return;
-
-      const slide = slideRefs.current[activeIndex];
-      const inner = slide?.querySelector(".intro-slide-inner");
-      if (inner && inner.scrollHeight > inner.clientHeight + 4) {
-        const atTop = inner.scrollTop <= 0;
-        const atBottom = inner.scrollTop + inner.clientHeight >= inner.scrollHeight - 4;
-        if (delta > 0 && !atBottom) return;
-        if (delta < 0 && !atTop) return;
-      }
 
       event.preventDefault();
       wheelLock.current = true;
@@ -959,12 +894,8 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
         <section className="intro-slide" id="hero" ref={setSlideRef(0)}>
           <HeroParticles />
           <div className="intro-slide-inner intro-hero">
-            <div className="intro-kicker">
-              <span className="intro-kicker-dot" aria-hidden />
-              Groq-powered swarm IDE
-            </div>
             <div className="intro-hero-logo-wrap">
-              <img className="intro-hero-logo" src="/crt.jpg" alt="Open IDE on CRT" width={168} height={168} />
+              <img className="intro-hero-logo" src="/crt.jpg" alt="Open IDE on CRT" width={112} height={112} />
             </div>
             <h1>Open IDE</h1>
             <CyclingTagline />
@@ -984,8 +915,8 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
               ) : null}
             </div>
             <div className="intro-stats">
-              {INTRO_STATS.map((stat, index) => (
-                <AnimatedStat key={stat.label} stat={stat} index={index} active={activeIndex === 0} />
+              {INTRO_STATS.map((stat) => (
+                <AnimatedStat key={stat.label} stat={stat} />
               ))}
             </div>
           </div>
