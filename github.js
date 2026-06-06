@@ -155,6 +155,64 @@ export async function createGitHubRepo({ token, login, repoName, description, is
   };
 }
 
+/** Delete all tracked files from a GitHub repo branch (one commit per file). */
+export async function deleteAllGitHubRepoFiles({
+  token,
+  owner,
+  name,
+  maxFiles = 500,
+} = {}) {
+  const repo = await githubFetch(`/repos/${owner}/${name}`, { token });
+  const branch = repo.default_branch || "main";
+  const tree = await githubFetch(
+    `/repos/${owner}/${name}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    { token }
+  );
+
+  const blobs = (tree.tree || [])
+    .filter((item) => item.type === "blob" && item.path)
+    .slice(0, maxFiles);
+
+  let deleted = 0;
+  for (const item of blobs) {
+    try {
+      let sha = item.sha;
+      try {
+        const meta = await githubFetch(
+          `/repos/${owner}/${name}/contents/${encodeRepoPath(item.path)}?ref=${encodeURIComponent(branch)}`,
+          { token }
+        );
+        if (!Array.isArray(meta) && meta.sha) sha = meta.sha;
+      } catch {
+        // fall back to tree sha
+      }
+
+      await githubFetch(`/repos/${owner}/${name}/contents/${encodeRepoPath(item.path)}`, {
+        token,
+        method: "DELETE",
+        body: {
+          message: `Open IDE: remove ${item.path}`,
+          sha,
+          branch,
+        },
+      });
+      deleted += 1;
+    } catch {
+      // skip paths we cannot delete (permissions, stale sha, etc.)
+    }
+  }
+
+  return {
+    owner,
+    name,
+    branch,
+    fullName: repo.full_name || `${owner}/${name}`,
+    url: repo.html_url || `https://github.com/${owner}/${name}`,
+    deleted,
+    total: blobs.length,
+  };
+}
+
 export async function pushRunToGitHub({ token, login, runId, prompt, repoName, repoOwner }) {
   const manifest = JSON.parse(await storage.readText(runManifestPath(runId)));
   const files = await listRunFilesRecursive(runId);

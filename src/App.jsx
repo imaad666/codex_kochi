@@ -19,6 +19,7 @@ import HyperreasoningPanel from "./HyperreasoningPanel.jsx";
 import IntroSite, { introCss } from "./IntroSite.jsx";
 import { flowNodeCss, flowNodeTypes } from "./FlowNodes.jsx";
 import {
+  CLEAR_GITHUB_REPO_REPLY,
   CLEAR_WORKSPACE_REPLY,
   greetingReply,
   isGreeting,
@@ -354,6 +355,7 @@ function App() {
   const fileInputRef = useRef(null);
   const inspoFileInputRef = useRef(null);
   const chatEndRef = useRef(null);
+  const repoAutoLoadRef = useRef(new Set());
 
   const appendChat = useCallback((role, text, meta = {}) => {
     setChatMessages((current) => [
@@ -775,6 +777,7 @@ function App() {
       if (count) {
         setFileSystem(next);
         setActiveFile(data.files[0]?.path || null);
+        if (repo.fullName) repoAutoLoadRef.current.add(repo.fullName);
         appendChat("system", `Loaded ${count} file(s) from GitHub (${data.branch || "main"}).`);
       } else {
         appendChat("system", "Repo linked — no readable text files found (or repo is empty).");
@@ -937,14 +940,18 @@ function App() {
       }
       if (session.planSummary) setPlanSummary(session.planSummary);
       if (session.planSteps?.length) setPlanSteps(session.planSteps);
+      const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
       if (session.githubRepo) {
         setGithubRepo(session.githubRepo);
         if (fileCount === 0 && session.githubRepo.source === "existing") {
-          loadRepoIntoWorkspace(session.githubRepo).catch(() => {});
+          const key = session.githubRepo.fullName;
+          if (key && !repoAutoLoadRef.current.has(key)) {
+            repoAutoLoadRef.current.add(key);
+            loadRepoIntoWorkspace(session.githubRepo).catch(() => {});
+          }
         }
       }
       if (session.localOnly) setLocalOnly(true);
-      const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
       const hasProgress =
         session.prompt ||
         session.githubRepo ||
@@ -1015,6 +1022,9 @@ function App() {
   useEffect(() => {
     if (stage !== "ide" || !githubRepo || githubRepo.source !== "existing") return;
     if (Object.keys(fileSystem).length > 0) return;
+    const key = githubRepo.fullName;
+    if (!key || repoAutoLoadRef.current.has(key)) return;
+    repoAutoLoadRef.current.add(key);
     loadRepoIntoWorkspace(githubRepo).catch(() => {});
   }, [stage, githubRepo, fileSystem, loadRepoIntoWorkspace]);
 
@@ -1283,6 +1293,33 @@ function App() {
     setStatus((current) => ({ ...current, error: "", runPath: "" }));
   }, [setNodes, setEdges]);
 
+  const clearGitHubRepo = useCallback(async () => {
+    if (!githubRepo?.name || outputBusy) return;
+    if (!authUser?.authenticated) {
+      window.location.assign("/api/auth/github");
+      return;
+    }
+    setOutputBusy("clear-repo");
+    try {
+      const res = await fetch("/api/github/clear-repo", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner: githubRepo.owner, repoName: githubRepo.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not clear repo");
+      clearWorkspace();
+      if (githubRepo.fullName) repoAutoLoadRef.current.add(githubRepo.fullName);
+      appendChat("controller", CLEAR_GITHUB_REPO_REPLY(githubRepo.fullName, data.deleted ?? 0));
+      if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      appendChat("system", error.message || "GitHub repo clear failed");
+    } finally {
+      setOutputBusy("");
+    }
+  }, [githubRepo, outputBusy, authUser, clearWorkspace, appendChat]);
+
   const sendChat = useCallback(async () => {
     const text = chatInput.trim();
     if (!text) return;
@@ -1298,7 +1335,24 @@ function App() {
 
     if (intent?.type === "clear-workspace") {
       clearWorkspace();
+      if (githubRepo?.fullName) repoAutoLoadRef.current.add(githubRepo.fullName);
       appendChat("controller", CLEAR_WORKSPACE_REPLY);
+      return;
+    }
+
+    if (intent?.type === "clear-github-repo") {
+      if (!githubRepo?.name) {
+        appendChat("controller", "No GitHub repo linked. Pick a repo first.");
+        setStage("repo");
+        return;
+      }
+      if (!authUser?.authenticated) {
+        appendChat("controller", "Sign in with GitHub first…");
+        window.location.assign("/api/auth/github");
+        return;
+      }
+      appendChat("controller", `Deleting all files from ${githubRepo.fullName} on GitHub…`);
+      clearGitHubRepo();
       return;
     }
 
@@ -1408,6 +1462,7 @@ function App() {
     searchGraphData.branches,
     searchLog,
     clearWorkspace,
+    clearGitHubRepo,
     status.runId,
     githubRepo,
     authUser,

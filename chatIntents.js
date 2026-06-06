@@ -36,17 +36,27 @@ export function matchChatIntent(message) {
   const text = String(message || "").trim().toLowerCase();
   if (!text) return null;
 
+  const mentionsRemote =
+    /\b(repo|github|remote)\b/.test(text) || /\bfrom\s+the\s+repo\b/.test(text);
+
   const wantsDelete =
     /\b(delete|clear|wipe|remove|reset|empty|nuke|purge|trash)\b/.test(text) &&
-    (/\b(everything|all|repo|files?|workspace|project|generated|session|output|build)\b/.test(text) ||
+    (/\b(everything|all|files?|contents?|workspace|project|generated|session|output|build)\b/.test(text) ||
       /\bdelete\s+everything\b/.test(text) ||
       /^clear\s*!*\.?$/i.test(message.trim()));
+
+  if (wantsDelete && mentionsRemote) {
+    return { type: "clear-github-repo" };
+  }
 
   if (wantsDelete) {
     return { type: "clear-workspace" };
   }
 
-  if (/^(push|push\s+to\s+(github|repo|remote))[\s!.]*$/i.test(text) || /\bpush\s+(changes|code|files)\b/i.test(text)) {
+  if (
+    /^(push|pusj|push\s+to\s+(github|repo|remote))[\s!.]*$/i.test(text) ||
+    /\bpush\s+(changes|code|files)\b/i.test(text)
+  ) {
     return { type: "push" };
   }
 
@@ -63,3 +73,6 @@ export function matchChatIntent(message) {
 
 export const CLEAR_WORKSPACE_REPLY =
   "Cleared all generated files from this IDE session. Your remote GitHub repo is unchanged — nothing was pushed or deleted on GitHub.";
+
+export const CLEAR_GITHUB_REPO_REPLY = (fullName, deleted) =>
+  `Deleted ${deleted} file(s) from ${fullName} on GitHub and cleared the local workspace.`;
