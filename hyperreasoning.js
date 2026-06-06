@@ -239,7 +239,8 @@ async function fetchCandidates(intent, agents, attachments) {
         controllerPrompt(intent, agents, attachments),
         "Produce 3 meaningfully different architectural branches.",
       ].join("\n"),
-      attachments
+      attachments,
+      { includeImages: false }
     ),
   });
   return result.candidates || [];

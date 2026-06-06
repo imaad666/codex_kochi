@@ -43,9 +43,9 @@ import {
   selectedAgents,
   workerPrompt,
 } from "./agents.js";
-import { GroqError, agentGroqConfig, groqConfig, groqJson, groqText } from "./groq.js";
+import { GroqError, agentGroqConfig, groqConfig, groqJson, groqText, truncateText } from "./groq.js";
 import { runHyperreasoning } from "./hyperreasoning.js";
-import { searchInspiration } from "./inspo-agent.js";
+import { resolveInspoAttachments, searchInspiration } from "./inspo-agent.js";
 import { createSessionId, loadSession, saveSession } from "./sessions.js";
 
 try {
@@ -133,7 +133,7 @@ function sanitizeAttachments(attachments = []) {
         content: kind === "text" ? String(attachment.content || "").slice(0, 3000) : "",
         dataUrl:
           kind === "image" && String(attachment.dataUrl || "").startsWith("data:image/")
-            ? String(attachment.dataUrl).slice(0, 28_000_000)
+            ? String(attachment.dataUrl).slice(0, 140_000)
             : "",
       };
     });
@@ -211,12 +211,17 @@ function parseWorkerText(text, agent) {
   };
 }
 
-async function runAgent({ intent, plan, agent, attachments, sharedContext = "" }) {
+async function runAgent({ intent, plan, agent, attachments, inspoImages = [], sharedContext = "" }) {
   const provider = agentGroqConfig(agent.title);
+  const visionAttachments =
+    agent.title === "Frontend" && inspoImages.length
+      ? [...attachments.filter((item) => item.kind !== "image"), ...inspoImages]
+      : attachments;
+  const includeImages = agent.title === "Frontend" && inspoImages.length > 0;
   const user = attachmentContent(
-    workerPrompt({ intent, plan, agent, attachments, sharedContext }),
-    attachments,
-    { includeImages: false }
+    workerPrompt({ intent, plan, agent, attachments: visionAttachments, sharedContext }),
+    visionAttachments,
+    { includeImages }
   );
   const system = [
     agent.systemPrompt,
@@ -379,7 +384,7 @@ function stripCodeFence(value) {
   return match ? match[1].trim() : value;
 }
 
-async function executeSwarm({ emit, intent, plan, agents, attachments }) {
+async function executeSwarm({ emit, intent, plan, agents, attachments, inspoImages = [] }) {
   const pending = new Map(agents.map((agent) => [agent.title, agent]));
   const completed = new Map();
   const completedOutputs = [];
@@ -422,6 +427,7 @@ async function executeSwarm({ emit, intent, plan, agents, attachments }) {
           plan,
           agent,
           attachments,
+          inspoImages,
           sharedContext: buildSharedContext(completedOutputs),
         })
       );
@@ -929,25 +935,41 @@ async function handleChatSend({ message, target = "altbot", context = {} }) {
     .map((file) => `// ${file.filename}\n${String(file.code || "").slice(0, 1200)}`)
     .join("\n\n")
     .slice(0, 3000);
+  const inspoItems = (context.inspoSelection || []).filter((item) => item?.url);
+  const inspoTitles = inspoItems.map((item) => item.title || item.id).filter(Boolean).slice(0, 6);
+  const inspoLine = inspoTitles.length
+    ? `Inspo board (${inspoTitles.length} pinned): ${inspoTitles.join(", ")}. Treat these as the visual direction for UI styling.`
+    : "";
 
   try {
     const provider = agentGroqConfig(isAgent ? agentName : "altbot");
+    const chatText = [
+      `Respond to this user message directly. Background context is reference only — do not ignore the question.`,
+      `User message: ${text}`,
+      context.prompt ? `Original build prompt: ${context.prompt}` : "",
+      context.planSummary ? `Background plan (only if relevant): ${context.planSummary}` : "",
+      context.searchWinner ? `Hyperreasoning winner id: ${context.searchWinner}` : "",
+      branchLines ? `Hyperreasoning branches:\n${branchLines}` : "",
+      context.files?.length ? `Project files: ${context.files.join(", ")}` : "",
+      fileLines ? `Relevant code:\n${fileLines}` : "",
+      context.searchLog?.length ? `Search log:\n${context.searchLog.slice(-8).join("\n")}` : "",
+      context.selectedAgents?.length ? `Active swarm: ${context.selectedAgents.join(", ")}` : "",
+      inspoLine,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    let userPayload = chatText;
+    if (agentName === "Frontend" && inspoItems.length) {
+      const inspoImages = await resolveInspoAttachments(inspoItems, { max: 1, maxBytes: 90_000 });
+      if (inspoImages.length) {
+        userPayload = attachmentContent(chatText, inspoImages, { includeImages: true });
+      }
+    }
+
     const reply = await groqText({
       system: isAgent ? agentChatSystem(agentName) : ALTBOT_CHAT_SYSTEM,
-      user: [
-        `Respond to this user message directly. Background context is reference only — do not ignore the question.`,
-        `User message: ${text}`,
-        context.prompt ? `Original build prompt: ${context.prompt}` : "",
-        context.planSummary ? `Background plan (only if relevant): ${context.planSummary}` : "",
-        context.searchWinner ? `Hyperreasoning winner id: ${context.searchWinner}` : "",
-        branchLines ? `Hyperreasoning branches:\n${branchLines}` : "",
-        context.files?.length ? `Project files: ${context.files.join(", ")}` : "",
-        fileLines ? `Relevant code:\n${fileLines}` : "",
-        context.searchLog?.length ? `Search log:\n${context.searchLog.slice(-8).join("\n")}` : "",
-        context.selectedAgents?.length ? `Active swarm: ${context.selectedAgents.join(", ")}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
+      user: userPayload,
       maxTokens: 220,
       temperature: 0.4,
       model: provider.model,
@@ -988,9 +1010,11 @@ async function runSwarmGeneration(emit, body = {}) {
   }
 
   const runId = randomUUID();
-  const intent = String(prompt || "Build an application").trim();
+  const intent = truncateText(String(prompt || "Build an application").trim(), 2800);
   const cleanAttachments = sanitizeAttachments(attachments);
-  const inspoSummary = inspoSummaryAttachments((inspoSelection || []).filter((item) => item?.url));
+  const inspoItems = (inspoSelection || []).filter((item) => item?.url);
+  const inspoSummary = inspoSummaryAttachments(inspoItems);
+  const inspoImages = await resolveInspoAttachments(inspoItems, { max: 1, maxBytes: 90_000 });
   const plannerAttachments = [...workerSafeAttachments(cleanAttachments), ...inspoSummary];
   const swarmAttachments = workerSafeAttachments([...cleanAttachments, ...inspoSummary]);
 
@@ -1014,6 +1038,7 @@ async function runSwarmGeneration(emit, body = {}) {
     plan: runnablePlan,
     agents,
     attachments: swarmAttachments,
+    inspoImages,
   });
 
   const manifest = await persistRun({

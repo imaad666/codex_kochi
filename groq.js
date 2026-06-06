@@ -59,6 +59,69 @@ async function groqThrottle() {
   lastGroqCall = Date.now();
 }
 
+function userPayloadCharLength(user) {
+  if (typeof user === "string") return user.length;
+  if (!Array.isArray(user)) return String(user || "").length;
+  let chars = 0;
+  for (const part of user) {
+    if (part?.type === "text") chars += String(part.text || "").length;
+    else if (part?.type === "image_url") chars += 12_000;
+  }
+  return chars;
+}
+
+function truncateUserPayload(user, maxChars) {
+  if (typeof user === "string") return truncateText(user, maxChars);
+  if (!Array.isArray(user)) return truncateText(String(user || ""), maxChars);
+  let remaining = maxChars;
+  return user
+    .map((part) => {
+      if (part?.type !== "text") return part;
+      const text = String(part.text || "");
+      if (text.length <= remaining) {
+        remaining -= text.length;
+        return part;
+      }
+      const clipped = truncateText(text, Math.max(0, remaining));
+      remaining = 0;
+      return { ...part, text: clipped };
+    })
+    .filter((part) => part?.type !== "text" || String(part.text || "").length > 0);
+}
+
+function fitUserPayload(systemLen, user, maxTokens) {
+  const { requestCharBudget } = groqConfig();
+  const userBudget = Math.max(1800, requestCharBudget - systemLen);
+  let userContent =
+    typeof user === "string"
+      ? truncateText(user, userBudget)
+      : truncateUserPayload(user, userBudget);
+
+  if (Array.isArray(userContent)) {
+    while (userContent.some((part) => part?.type === "image_url")) {
+      const inputChars = systemLen + userPayloadCharLength(userContent);
+      try {
+        capOutputTokens(inputChars, maxTokens);
+        break;
+      } catch {
+        const lastImageIndex = userContent.map((part, index) => (part?.type === "image_url" ? index : -1)).reduce((a, b) => Math.max(a, b), -1);
+        if (lastImageIndex < 0) break;
+        userContent = userContent.filter((_, index) => index !== lastImageIndex);
+      }
+    }
+    if (!userContent.some((part) => part?.type === "image_url")) {
+      userContent = truncateUserPayload(
+        userContent,
+        userBudget
+      );
+    }
+  }
+
+  const inputChars = systemLen + userPayloadCharLength(userContent);
+  const cappedOutput = capOutputTokens(inputChars, maxTokens);
+  return { userContent, inputChars, cappedOutput };
+}
+
 function capOutputTokens(inputChars, requestedOutput) {
   const { maxOutputTokens, tpmSafeTotal } = groqConfig();
   const inputTokens = estimateTokens(inputChars);
@@ -66,7 +129,7 @@ function capOutputTokens(inputChars, requestedOutput) {
   const capped = Math.min(requestedOutput, maxOutputTokens, room);
   if (capped < 256) {
     throw new GroqError(
-      "Prompt too large for Groq free tier — shorten your build prompt or deselect an agent."
+      "Prompt too large for Groq free tier — shorten your build prompt, deselect an agent, or use fewer/smaller inspo images."
     );
   }
   return capped;
@@ -265,12 +328,7 @@ export async function groqText({
   }
 
   const systemContent = truncateText(system, 2800);
-  const userContent =
-    typeof user === "string"
-      ? truncateText(user, Math.max(2000, requestCharBudget - systemContent.length))
-      : user;
-  const inputChars = systemContent.length + (typeof userContent === "string" ? userContent.length : 2000);
-  const cappedOutput = capOutputTokens(inputChars, maxTokens);
+  const { userContent, cappedOutput } = fitUserPayload(systemContent.length, user, maxTokens);
 
   await groqThrottle();
 

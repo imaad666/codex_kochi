@@ -5,6 +5,7 @@ import {
   INTRO_FLOW,
   INTRO_MANIFESTO,
   INTRO_STATS,
+  formatGroqModel,
 } from "./agentCards.js";
 
 const CRT = {
@@ -22,6 +23,8 @@ const SECTION_META = [
   { id: "features", label: "Features" },
   { id: "launch", label: "Launch" },
 ];
+
+const REPO_URL = "https://github.com/imaad666/codex_kochi";
 
 const TAGLINE_VERBS = ["plans", "writes", "ships", "hyperreasons"];
 
@@ -644,6 +647,14 @@ export const introCss = `
     font-size: clamp(16px, 1.6vw, 20px);
     letter-spacing: 1px;
   }
+  .intro-showcase-card .card-model {
+    display: block;
+    margin-top: 4px;
+    color: ${CRT.led};
+    font-size: clamp(11px, 1.2vw, 13px);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
   .intro-showcase-card .card-blurb {
     display: block;
     margin-top: 8px;
@@ -759,6 +770,18 @@ export const introCss = `
   }
   .intro-final .intro-btn-primary {
     animation: none;
+  }
+  .intro-final-actions {
+    margin-top: 0.75rem;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .intro-repo-link {
+    display: inline-block;
+    text-decoration: none;
+    letter-spacing: 1px;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -977,6 +1000,9 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
                   <span className="card-copy">
                     <span className="card-name">{card.name}</span>
                     <span className="card-role">{card.role}</span>
+                    {card.model ? (
+                      <span className="card-model">Groq · {formatGroqModel(card.model)}</span>
+                    ) : null}
                     <span className="card-blurb">{card.introBlurb}</span>
                   </span>
                 </RevealBlock>
@@ -1034,6 +1060,18 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
               <button type="button" className="intro-btn-primary" onClick={onLaunch}>
                 Launch Open IDE
               </button>
+            </RevealBlock>
+            <RevealBlock delay={0.28}>
+              <div className="intro-final-actions">
+                <a
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="intro-btn-ghost intro-repo-link"
+                >
+                  Checkout the repo
+                </a>
+              </div>
             </RevealBlock>
           </div>
         </section>

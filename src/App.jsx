@@ -14,7 +14,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
-import { AGENT_CARDS } from "./agentCards.js";
+import { AGENT_CARDS, formatGroqModel } from "./agentCards.js";
 import FileExplorer from "./FileExplorer.jsx";
 import TerminalPanel from "./TerminalPanel.jsx";
 import HyperreasoningPanel from "./HyperreasoningPanel.jsx";
@@ -42,6 +42,46 @@ function formatRepoAge(iso) {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return months === 1 ? "1mo ago" : `${months}mo ago`;
+}
+
+function compressImageFile(file, { maxDim = 768, quality = 0.72, maxBytes = 100_000 } = {}) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result || "");
+      if (!src.startsWith("data:image/")) {
+        resolve(src);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        const scale = Math.min(1, maxDim / Math.max(width, height, 1));
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(src.slice(0, 140_000));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        let q = quality;
+        let dataUrl = canvas.toDataURL("image/jpeg", q);
+        while (dataUrl.length > maxBytes * 1.37 && q > 0.35) {
+          q -= 0.08;
+          dataUrl = canvas.toDataURL("image/jpeg", q);
+        }
+        resolve(dataUrl.slice(0, 140_000));
+      };
+      img.onerror = () => resolve(src.slice(0, 140_000));
+      img.src = src;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
 }
 
 const PROMPT_QUESTION = "WHAT DO YOU WANT TO BUILD TODAY?";
@@ -1089,21 +1129,36 @@ function App() {
 
   const readAttachment = (file) =>
     new Promise((resolve) => {
-      const reader = new FileReader();
       const isImage = file.type.startsWith("image/");
       const isText =
         file.type.startsWith("text/") ||
         /\.(md|txt|json|csv|js|jsx|ts|tsx|html|css|sql|xml|yaml|yml)$/i.test(file.name);
 
+      if (isImage) {
+        compressImageFile(file).then((dataUrl) =>
+          resolve({
+            id: `${file.name}-${file.size}-${file.lastModified}`,
+            name: file.name,
+            type: file.type || "image/jpeg",
+            size: file.size,
+            kind: "image",
+            content: "",
+            dataUrl,
+          })
+        );
+        return;
+      }
+
+      const reader = new FileReader();
       reader.onload = () => {
         resolve({
           id: `${file.name}-${file.size}-${file.lastModified}`,
           name: file.name,
           type: file.type || "application/octet-stream",
           size: file.size,
-          kind: isImage ? "image" : isText ? "text" : "file",
+          kind: isText ? "text" : "file",
           content: isText ? String(reader.result || "").slice(0, 120000) : "",
-          dataUrl: isImage ? String(reader.result || "") : "",
+          dataUrl: "",
         });
       };
       reader.onerror = () => {
@@ -1118,8 +1173,7 @@ function App() {
         });
       };
 
-      if (isImage) reader.readAsDataURL(file);
-      else if (isText) reader.readAsText(file);
+      if (isText) reader.readAsText(file);
       else reader.readAsArrayBuffer(file);
     });
 
@@ -1194,22 +1248,17 @@ function App() {
     if (!files.length) return;
 
     const additions = await Promise.all(
-      files.map(
-        (file) =>
-          new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () =>
-              resolve({
-                id: `inspo-local-${Date.now()}-${file.name}`,
-                title: file.name.replace(/\.[^.]+$/, "") || "upload",
-                url: reader.result,
-                thumbUrl: reader.result,
-                source: "upload",
-              });
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(file);
-          })
-      )
+      files.map(async (file) => {
+        const dataUrl = await compressImageFile(file);
+        if (!dataUrl) return null;
+        return {
+          id: `inspo-local-${Date.now()}-${file.name}`,
+          title: file.name.replace(/\.[^.]+$/, "") || "upload",
+          url: dataUrl,
+          thumbUrl: dataUrl,
+          source: "upload",
+        };
+      })
     );
 
     const next = additions.filter(Boolean);
@@ -1383,7 +1432,9 @@ function App() {
 
       if (resetWorkspace) setPrompt(raw);
 
-      const inspoSelection = inspoCandidates.filter((img) => inspoSelectedIds.includes(img.id));
+      const inspoSelection = inspoCandidates
+        .filter((img) => inspoSelectedIds.includes(img.id))
+        .map(({ id, title, url, source, thumbUrl }) => ({ id, title, url, source, thumbUrl }));
       if (inspoSelection.length) {
         appendChat("system", `Using ${inspoSelection.length} inspiration image(s) as visual context.`);
       }
@@ -1538,6 +1589,10 @@ function App() {
         filename,
         code: String(entry?.code || "").slice(0, chatTarget === "altbot" ? 500 : 800),
       }));
+    const inspoSelection = inspoCandidates
+      .filter((img) => inspoSelectedIds.includes(img.id))
+      .map(({ id, title, url, source, thumbUrl }) => ({ id, title, url, source, thumbUrl }));
+
     try {
       const reply = await postChat({
         message: text,
@@ -1551,6 +1606,7 @@ function App() {
           fileContents,
           searchBranches: hasFiles ? searchGraphData.branches : [],
           searchLog: hasFiles ? searchLog.map((line) => line.text) : [],
+          inspoSelection,
         },
       });
       appendChat(reply.role || "controller", reply.text, { agent: reply.agent });
@@ -1569,6 +1625,8 @@ function App() {
     fileSystem,
     searchGraphData.branches,
     searchLog,
+    inspoCandidates,
+    inspoSelectedIds,
     clearWorkspace,
     clearGitHubRepo,
     status.runId,
@@ -2041,6 +2099,15 @@ function App() {
       line-height: 1.05;
       text-shadow: 1px 1px 0 #0005;
     }
+    .card-model {
+      display: block;
+      margin-top: 4px;
+      color: ${CRT.led};
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      text-shadow: 1px 1px 0 #0005;
+    }
     .card-state {
       position: absolute;
       top: 7px;
@@ -2279,17 +2346,22 @@ function App() {
       overflow: hidden;
     }
     .ide-crt .chat {
-      flex: 1 1 55%;
+      flex: 1 1 auto;
       min-height: 140px;
-      max-height: 62%;
-      border-bottom: 2px solid #3a787866;
+      border-bottom: 0;
+      border-top: 2px solid #3a787866;
     }
     .ide-crt .inspo-board {
-      flex: 1 1 38%;
+      flex: 0 0 auto;
       min-height: 200px;
-      max-height: 42%;
+      max-height: 46%;
       overflow: hidden;
-      border-top: 1px solid #3a787866;
+      border-top: 0;
+      border-bottom: 1px solid #3a787866;
+    }
+    .ide-crt .right.ui-bot-active .inspo-board {
+      min-height: 220px;
+      max-height: 52%;
     }
     .ide-workspace {
       flex: 1;
@@ -3833,6 +3905,9 @@ function App() {
                       <span className="card-copy">
                         <span className="card-name">{card.name}</span>
                         <span className="card-role">{card.role}</span>
+                        {card.model ? (
+                          <span className="card-model">Groq · {formatGroqModel(card.model)}</span>
+                        ) : null}
                         <span className="card-description">{card.description}</span>
                       </span>
                     </button>
@@ -4017,7 +4092,11 @@ function App() {
               aria-label="Resize sidebar"
               onMouseDown={startResizeRight}
             />
-            <aside className="right crt-scroll" style={{ width: rightWidth }}>
+            <aside
+              className={`right crt-scroll ${chatTarget === "Frontend" ? "ui-bot-active" : ""}`}
+              style={{ width: rightWidth }}
+            >
+              {renderInspoBoard()}
               <div className="chat">
                 <div className="chat-head">CHAT · ROUTING</div>
                 <div className="chat-mode-row">
@@ -4087,7 +4166,6 @@ function App() {
                   </button>
                 </div>
               </div>
-              {renderInspoBoard()}
             </aside>
           </div>
           <footer className="ide-statusbar crt-statusbar">

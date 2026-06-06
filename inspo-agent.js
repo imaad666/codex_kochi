@@ -109,8 +109,17 @@ export async function searchInspiration(prompt, count = 5) {
   return { mood, queries, images: images.slice(0, count) };
 }
 
-export async function fetchImageAsDataUrl(url, maxBytes = 4_500_000) {
-  const res = await fetch(url, {
+export async function fetchImageAsDataUrl(url, maxBytes = 120_000) {
+  const raw = String(url || "");
+  if (raw.startsWith("data:image/")) {
+    if (raw.length > maxBytes * 1.37) {
+      throw new GroqError("Inspiration image too large — use a smaller file or screenshot");
+    }
+    const type = raw.slice(5, raw.indexOf(";")) || "image/jpeg";
+    return { dataUrl: raw, type, size: Math.round(raw.length * 0.75) };
+  }
+
+  const res = await fetch(raw, {
     headers: { "User-Agent": "OpenIDE/1.0", Accept: "image/*" },
     signal: AbortSignal.timeout(12_000),
   });
@@ -130,10 +139,15 @@ export async function fetchImageAsDataUrl(url, maxBytes = 4_500_000) {
 }
 
 export async function inspoToAttachments(selected = []) {
+  return resolveInspoAttachments(selected, { max: 2, maxBytes: 100_000 });
+}
+
+export async function resolveInspoAttachments(selected = [], { max = 1, maxBytes = 100_000 } = {}) {
   const attachments = [];
-  for (const item of selected.slice(0, 5)) {
+  for (const item of selected.slice(0, max)) {
+    if (!item?.url) continue;
     try {
-      const { dataUrl, type, size } = await fetchImageAsDataUrl(item.url);
+      const { dataUrl, type, size } = await fetchImageAsDataUrl(item.url, maxBytes);
       attachments.push({
         id: `inspo-${item.id}`,
         name: `inspo-${item.title || item.id}.jpg`,
@@ -143,10 +157,10 @@ export async function inspoToAttachments(selected = []) {
         content: "",
         dataUrl,
         source: "inspo",
-        inspoUrl: item.url,
+        inspoUrl: String(item.url).startsWith("data:") ? item.title || item.id : item.url,
       });
     } catch (error) {
-      console.warn("[inspo] skip image", item.url, error.message);
+      console.warn("[inspo] skip image", item.url?.slice?.(0, 48) || item.id, error.message);
     }
   }
   return attachments;

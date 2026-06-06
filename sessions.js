@@ -30,14 +30,18 @@ const DEFAULT_SESSION = {
 };
 
 function slimInspoCandidates(candidates = []) {
-  return candidates.slice(0, 12).map((item) => ({
-    id: item.id,
-    title: String(item.title || "").slice(0, 120),
-    url: item.url,
-    thumbUrl: item.thumbUrl || item.url,
-    source: item.source,
-    query: item.query,
-  }));
+  return candidates.slice(0, 12).map((item) => {
+    const url = String(item.url || "");
+    const thumbUrl = String(item.thumbUrl || item.url || "");
+    return {
+      id: item.id,
+      title: String(item.title || "").slice(0, 120),
+      url: url.startsWith("data:image/") ? url.slice(0, 140_000) : url,
+      thumbUrl: thumbUrl.startsWith("data:image/") ? thumbUrl.slice(0, 140_000) : thumbUrl,
+      source: item.source,
+      query: item.query,
+    };
+  });
 }
 
 function slimAttachments(attachments = []) {

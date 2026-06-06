@@ -3,6 +3,16 @@ import jobalyserCard from "../cards/SteveJob_Jobalyserr.jpg";
 import ivesCard from "../cards/jonyives_IVESUI.jpg";
 import wzdataCard from "../cards/steveaoz_WZDATA.jpg";
 
+export const GROQ_MODEL_DEFAULTS = {
+  planner: "meta-llama/llama-4-scout-17b-16e-instruct",
+  worker: "meta-llama/llama-4-scout-17b-16e-instruct",
+};
+
+export function formatGroqModel(modelId = "") {
+  const slug = String(modelId).split("/").pop() || modelId;
+  return slug.replace(/-16e-instruct$/i, "").replace(/-/g, " ");
+}
+
 export const AGENT_CARDS = [
   {
     name: "Altbot",
@@ -10,6 +20,7 @@ export const AGENT_CARDS = [
     description: "Plans and routes the swarm",
     image: altbotCard,
     locked: true,
+    model: GROQ_MODEL_DEFAULTS.planner,
     introBlurb:
       "Altbot is always on. It runs hyperreasoning, scores three architectural branches, kills the losers before any agent writes code, and routes your chat to the right specialist.",
   },
@@ -19,6 +30,7 @@ export const AGENT_CARDS = [
     description: "Architecture and API systems",
     image: jobalyserCard,
     agent: "Backend",
+    model: GROQ_MODEL_DEFAULTS.worker,
     introBlurb:
       "Jobalyser owns the server. APIs, routes, middleware, and system design — streamed live into server.js and whatever backend files your build needs.",
   },
@@ -28,6 +40,7 @@ export const AGENT_CARDS = [
     description: "Interface and experience",
     image: ivesCard,
     agent: "Frontend",
+    model: GROQ_MODEL_DEFAULTS.worker,
     introBlurb:
       "Ives UI owns what people see. React components, layout, interaction, and visual polish — written in real time while you watch the editor update.",
   },
@@ -37,6 +50,7 @@ export const AGENT_CARDS = [
     description: "Schema and data contracts",
     image: wzdataCard,
     agent: "Database",
+    model: GROQ_MODEL_DEFAULTS.worker,
     introBlurb:
       "WzData owns the data layer. Schemas, migrations, contracts, and persistence — aligned with what Frontend and Backend are building in parallel.",
   },

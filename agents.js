@@ -123,12 +123,17 @@ export function agentChatSystem(agentName) {
     `You are ${persona.displayName} (${agent.title}) inside Open IDE — a live multi-agent coding swarm.`,
     persona.tone,
     `Your lane only: ${persona.lane}.`,
+    agentName === "Frontend"
+      ? "The inspo board in the sidebar is always available — pinned references are your visual brief; align layout, color, and mood with them."
+      : null,
     "Answer the user's CURRENT message. Reference project files from context when they exist.",
     "Never sound like a generic chatbot. Banned phrases: 'How can I help', 'What can I assist', 'I'm here to help'.",
     "On greetings: one in-character sentence about what you own in this repo right now.",
     "You cannot clear the workspace or push to GitHub — Altbot handles that.",
     "Reply in 1-3 short sentences. No code blocks or JSON.",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export const ALTBOT_CHAT_SYSTEM = [
@@ -162,8 +167,10 @@ export function attachmentText(attachments = [], maxChars = 24000) {
 }
 
 export function attachmentContent(text, attachments = [], { includeImages = true } = {}) {
+  const hasImages =
+    includeImages && attachments.some((attachment) => attachment.kind === "image" && attachment.dataUrl);
+  if (!hasImages) return text;
   const content = [{ type: "text", text }];
-  if (!includeImages) return content;
   for (const attachment of attachments) {
     if (attachment.kind === "image" && attachment.dataUrl) {
       content.push({
@@ -178,6 +185,7 @@ export function attachmentContent(text, attachments = [], { includeImages = true
 }
 
 export function controllerPrompt(intent, agents, attachments = []) {
+  const intentText = String(intent || "").slice(0, 2200);
   return [
     "You are the controller for a visual multi-agent coding environment.",
     "Create a concise implementation plan, not code.",
@@ -186,20 +194,20 @@ export function controllerPrompt(intent, agents, attachments = []) {
     "If Database and Backend are both selected, Backend usually depends on the Database schema step.",
     "If Backend and Frontend are both selected, Frontend usually depends on the Backend API contract step.",
     `Selected agents: ${agents.map((agent) => agent.title).join(", ")}`,
-    `User intent: ${intent}`,
-    attachmentText(attachments),
+    `User intent: ${intentText}`,
+    attachmentText(attachments, 800),
   ].join("\n");
 }
 
 export function workerPrompt({ intent, plan, agent, attachments = [], sharedContext = "" }) {
   const ownedSteps = plan.steps.filter((step) => step.agent === agent.title);
   return [
-    `User intent: ${intent}`,
+    `User intent: ${String(intent || "").slice(0, 1800)}`,
     `Primary target filename: ${agent.file}`,
-    `Controller summary: ${plan.summary}`,
-    `Your assigned steps: ${JSON.stringify(ownedSteps)}`,
-    attachmentText(attachments, 1000),
-    sharedContext ? `Upstream context:\n${sharedContext}` : "",
+    `Controller summary: ${String(plan.summary || "").slice(0, 600)}`,
+    `Your assigned steps: ${JSON.stringify(ownedSteps).slice(0, 1200)}`,
+    attachmentText(attachments, 600),
+    sharedContext ? `Upstream context:\n${String(sharedContext).slice(0, 1600)}` : "",
     "Return the primary target file. Add one small helper file only if required.",
     "Use the ---FILE / ---END FILE--- block format from your system instructions.",
   ]
