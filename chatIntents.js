@@ -71,6 +71,16 @@ export function matchChatIntent(message) {
   return null;
 }
 
+/** Detect messages that should trigger a code swarm (when not in explicit Code mode). */
+export function looksLikeCodeRequest(message) {
+  const text = String(message || "").trim().toLowerCase();
+  if (text.length < 8) return false;
+  return (
+    /\b(build|create|add|implement|fix|update|change|refactor|rewrite|generate|make|write|code)\b/.test(text) ||
+    /\b(api|component|page|route|schema|endpoint|ui|feature)\b/.test(text)
+  );
+}
+
 export const CLEAR_WORKSPACE_REPLY =
   "Cleared all generated files from this IDE session. Your remote GitHub repo is unchanged — nothing was pushed or deleted on GitHub.";
 

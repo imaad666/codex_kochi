@@ -325,6 +325,7 @@ function App() {
   const [planSteps, setPlanSteps] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [chatMode, setChatMode] = useState("chat");
   const [chatTarget, setChatTarget] = useState("altbot");
   const [searchGraphData, setSearchGraphData] = useState({ branches: [], edges: [], bestPath: [] });
   const [inspoCandidates, setInspoCandidates] = useState([]);
@@ -358,6 +359,7 @@ function App() {
   const promptInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const inspoFileInputRef = useRef(null);
+  const lastInspoQueryRef = useRef("");
   const chatEndRef = useRef(null);
   const repoAutoLoadRef = useRef(new Set());
 
@@ -1128,26 +1130,55 @@ function App() {
     });
   }, []);
 
+  const searchInspo = useCallback(async (query) => {
+    const q = String(query || "").trim();
+    if (q.length < 6) return null;
+    if (lastInspoQueryRef.current === q) return null;
+    lastInspoQueryRef.current = q;
+    setInspoLoading(true);
+    try {
+      const result = await fetchInspiration(q);
+      const images = result.images || [];
+      setInspoCandidates(images);
+      setInspoMood(result.mood || "");
+      if (images.length) {
+        setInspoSelectedIds((current) =>
+          current.length ? current : images.slice(0, 3).map((img) => img.id)
+        );
+      }
+      return result;
+    } catch (error) {
+      appendChat("system", error.message || "SurfAgent could not load inspiration images.");
+      return null;
+    } finally {
+      setInspoLoading(false);
+    }
+  }, [appendChat]);
+
+  useEffect(() => {
+    if (stage !== "prompt") return undefined;
+    const q = prompt.trim();
+    if (q.length < 6) return undefined;
+    const timer = setTimeout(() => {
+      searchInspo(q);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [prompt, stage, searchInspo]);
+
   const continueToCards = useCallback(async () => {
     if (!prompt.trim()) return;
     setStage("cards");
-    setInspoLoading(true);
-    appendChat("system", "SurfAgent is scanning the web for visual inspiration…");
-    try {
-      const result = await fetchInspiration(prompt);
-      setInspoLoading(false);
-      setInspoCandidates(result.images || []);
-      setInspoMood(result.mood || "");
-      setInspoSelectedIds((result.images || []).slice(0, 3).map((img) => img.id));
-      appendChat(
-        "system",
-        `SurfAgent found ${(result.images || []).length} images (${(result.queries || []).join(", ")}).`
-      );
-    } catch (error) {
-      setInspoLoading(false);
-      appendChat("system", error.message || "SurfAgent could not load inspiration images.");
+    if (lastInspoQueryRef.current !== prompt.trim()) {
+      appendChat("system", "SurfAgent is scanning the web for visual inspiration…");
+      const result = await searchInspo(prompt);
+      if (result?.images?.length) {
+        appendChat(
+          "system",
+          `SurfAgent found ${result.images.length} images (${(result.queries || []).join(", ")}).`
+        );
+      }
     }
-  }, [prompt, appendChat]);
+  }, [prompt, searchInspo, appendChat]);
 
   const toggleInspo = useCallback((id) => {
     setInspoSelectedIds((current) =>
@@ -1361,6 +1392,12 @@ function App() {
       return;
     }
 
+    if (chatMode === "code") {
+      appendChat("controller", "Running hyperreasoning swarm…");
+      await runSwarmFromPrompt({ promptText: text, resetWorkspace: false });
+      return;
+    }
+
     if (isGreeting(text)) {
       const agentKey = chatTargetKey(chatTarget);
       const reply = greetingReply(agentKey, {
@@ -1425,57 +1462,101 @@ function App() {
     downloadZip,
     runPreview,
     setStage,
+    chatMode,
+    runSwarmFromPrompt,
   ]);
 
-  const init = useCallback(async () => {
-    setStage("ide");
-    setFileSystem({});
-    setActiveFile(null);
-    setRunningAgents([]);
-    setSearchPhase("searching");
-    setBottomPanelTab("graph");
-    setSearchLog([]);
-    setSearchWinner(null);
-    setPlanSummary("");
-    searchNodesRef.current = [];
-    searchEdgesRef.current = [];
-    bestPathRef.current = [];
-    executionGraphRef.current = { nodes: [], edges: [] };
-    setNodes([]);
-    setEdges([]);
-    setStatus((current) => ({ ...current, error: "" }));
-    const inspoSelection = inspoCandidates.filter((img) => inspoSelectedIds.includes(img.id));
-    appendChat("user", `Initialize swarm: ${prompt}`);
-    if (inspoSelection.length) {
-      appendChat("system", `Using ${inspoSelection.length} inspiration image(s) as visual context.`);
-    }
-    try {
-      await streamSwarmGenerate(
-        {
-          prompt,
-          agents: selected,
-          attachments,
-          inspoSelection,
-          sessionId,
-        },
-        swarmHandlers()
-      );
-    } catch (error) {
+  const runSwarmFromPrompt = useCallback(
+    async ({ promptText, resetWorkspace = false } = {}) => {
+      const raw = String(promptText || "").trim();
+      if (!raw) return false;
+      if (searchPhase === "searching" || runningAgents.length > 0) {
+        appendChat("system", "Swarm is already running — wait for it to finish.");
+        return false;
+      }
+      if (!selected.length) {
+        appendChat("system", "Select at least one agent (cards step) before running a swarm.");
+        return false;
+      }
+
+      setStage("ide");
+      if (resetWorkspace) {
+        setFileSystem({});
+        setActiveFile(null);
+      }
       setRunningAgents([]);
-      setSearchPhase("idle");
-      setStatus((current) => ({ ...current, error: error.message }));
-      appendChat("system", error.message || "Swarm failed");
-    }
-  }, [
-    prompt,
-    selected,
-    attachments,
-    inspoCandidates,
-    inspoSelectedIds,
-    sessionId,
-    appendChat,
-    swarmHandlers,
-  ]);
+      setSearchPhase("searching");
+      setBottomPanelTab("graph");
+      setSearchLog([]);
+      setSearchWinner(null);
+      setSearchVerdict(null);
+      setSearchComparisons([]);
+      setSearchSavings(null);
+      setPlanSummary("");
+      searchNodesRef.current = [];
+      searchEdgesRef.current = [];
+      bestPathRef.current = [];
+      executionGraphRef.current = { nodes: [], edges: [] };
+      setNodes([]);
+      setEdges([]);
+      setStatus((current) => ({ ...current, error: "" }));
+
+      const fileNames = Object.keys(fileSystem);
+      const swarmPrompt =
+        !resetWorkspace && fileNames.length
+          ? `Existing project files: ${fileNames.join(", ")}\n\nChange request: ${raw}`
+          : raw;
+
+      if (resetWorkspace) setPrompt(raw);
+
+      const inspoSelection = inspoCandidates.filter((img) => inspoSelectedIds.includes(img.id));
+      if (inspoSelection.length) {
+        appendChat("system", `Using ${inspoSelection.length} inspiration image(s) as visual context.`);
+      }
+
+      try {
+        await streamSwarmGenerate(
+          {
+            prompt: swarmPrompt,
+            agents: selected,
+            attachments,
+            inspoSelection,
+            sessionId,
+          },
+          swarmHandlers()
+        );
+        return true;
+      } catch (error) {
+        setRunningAgents([]);
+        setSearchPhase("idle");
+        setStatus((current) => ({ ...current, error: error.message }));
+        appendChat("system", error.message || "Swarm failed");
+        return false;
+      }
+    },
+    [
+      searchPhase,
+      runningAgents.length,
+      selected,
+      fileSystem,
+      inspoCandidates,
+      inspoSelectedIds,
+      attachments,
+      sessionId,
+      appendChat,
+      swarmHandlers,
+    ]
+  );
+
+  const openIdeDirectly = useCallback(() => {
+    setStage("ide");
+    appendChat("system", "IDE ready — use Code mode in chat to build or change files with hyperreasoning.");
+  }, [appendChat]);
+
+  const init = useCallback(async () => {
+    appendChat("user", `Initialize swarm: ${prompt}`);
+    await runSwarmFromPrompt({ promptText: prompt, resetWorkspace: true });
+  }, [prompt, appendChat, runSwarmFromPrompt]);
 
   const showSearchGraph = useCallback(() => {
     setBottomPanelTab("graph");
@@ -1525,7 +1606,11 @@ function App() {
       />
       {inspoLoading && <div className="inspo-empty">Scanning the web…</div>}
       {!inspoLoading && inspoCandidates.length === 0 && (
-        <div className="inspo-empty">Tap + to add images or continue from prompt to search.</div>
+        <div className="inspo-empty">
+          {stage === "prompt" || prompt.trim().length >= 6
+            ? "SurfAgent will search as you type…"
+            : "Type a prompt (6+ chars) to search, or tap + to add images."}
+        </div>
       )}
       <div className="inspo-grid">
         <button
@@ -3026,6 +3111,29 @@ function App() {
       text-transform: uppercase;
       border-bottom: 1px solid #3a787866;
     }
+    .chat-mode-row {
+      display: flex;
+      gap: 6px;
+      padding: 5px 8px;
+      border-bottom: 1px solid #3a787866;
+      background: #00000018;
+    }
+    .chat-mode-btn {
+      flex: 1;
+      background: transparent;
+      border: 1px solid #3a686866;
+      color: ${CRT.textDim};
+      padding: 4px 8px;
+      font: inherit;
+      font-size: 14px;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .chat-mode-btn.on {
+      border-color: ${CRT.text};
+      color: ${CRT.textSoft};
+      box-shadow: 0 0 10px ${CRT.text}33;
+    }
     .chat-tabs {
       display: flex;
       gap: 4px;
@@ -3366,10 +3474,20 @@ function App() {
                     type="button"
                     onClick={() => {
                       setLocalOnly(true);
+                      openIdeDirectly();
+                    }}
+                  >
+                    OPEN IDE · LOCAL
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => {
+                      setLocalOnly(true);
                       setStage("prompt");
                     }}
                   >
-                    SKIP · BUILD LOCAL ONLY
+                    BUILD WITH PROMPT
                   </button>
                 </>
               ) : !authUser?.authenticated ? (
@@ -3404,6 +3522,9 @@ function App() {
                   <div className="repo-cta-row">
                     <button className="repo-action ghost" type="button" onClick={() => setGithubRepo(null)}>
                       change repo
+                    </button>
+                    <button className="repo-action ghost" type="button" onClick={openIdeDirectly}>
+                      open IDE
                     </button>
                     <button className="repo-action" type="button" onClick={() => setStage("prompt")}>
                       continue →
@@ -3848,6 +3969,23 @@ function App() {
             <aside className="right crt-scroll" style={{ width: rightWidth }}>
               <div className="chat">
                 <div className="chat-head">CHAT · ROUTING</div>
+                <div className="chat-mode-row">
+                  <button
+                    type="button"
+                    className={`chat-mode-btn ${chatMode === "chat" ? "on" : ""}`}
+                    onClick={() => setChatMode("chat")}
+                  >
+                    Chat
+                  </button>
+                  <button
+                    type="button"
+                    className={`chat-mode-btn ${chatMode === "code" ? "on" : ""}`}
+                    onClick={() => setChatMode("code")}
+                    title="Run hyperreasoning + swarm to build or change code"
+                  >
+                    Code
+                  </button>
+                </div>
                 <div className="chat-tabs">
                   {chatTargets.map((target) => (
                     <button
@@ -3885,14 +4023,16 @@ function App() {
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && sendChat()}
                     placeholder={
-                      chatTarget === "altbot"
-                        ? "Message Altbot…"
-                        : `Message ${chatTargets.find((t) => t.id === chatTarget)?.label || chatTarget}…`
+                      chatMode === "code"
+                        ? "Describe what to build or change… (hyperreasoning swarm)"
+                        : chatTarget === "altbot"
+                          ? "Message Altbot…"
+                          : `Message ${chatTargets.find((t) => t.id === chatTarget)?.label || chatTarget}…`
                     }
                     aria-label="Chat message"
                   />
                   <button type="button" className="chat-send" onClick={sendChat}>
-                    SEND
+                    {chatMode === "code" ? "RUN" : "SEND"}
                   </button>
                 </div>
               </div>
