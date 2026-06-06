@@ -1,14 +1,4 @@
 {
   "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "framework": null,
-  "functions": {
-    "server.js": {
-      "maxDuration": 300
-    }
-  },
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/server.js" },
-    { "source": "/((?!api/).*)", "destination": "/server.js" }
-  ]
+  "installCommand": "npm install"
 }

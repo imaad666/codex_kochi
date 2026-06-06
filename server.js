@@ -978,13 +978,17 @@ app.post("/api/swarm/generate", async (req, res) => {
   }
 });
 
-if (IS_VERCEL || process.env.NODE_ENV === "production") {
+if (!IS_VERCEL && process.env.NODE_ENV === "production") {
   app.use(express.static(join(ROOT_DIR, "dist")));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
     res.sendFile(join(ROOT_DIR, "dist", "index.html"));
   });
 }
+
+export const config = {
+  maxDuration: 300,
+};
 
 export default app;
 
