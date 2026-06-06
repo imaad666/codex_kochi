@@ -132,10 +132,42 @@ function fitUserPayload(systemLen, user, maxTokens) {
   return { userContent, inputChars, cappedOutput };
 }
 
-function capOutputTokens(inputChars, requestedOutput) {
+function fitChatPayload(systemLen, user, maxTokens) {
+  const requestCharBudget = Number(process.env.GROQ_CHAT_CHAR_BUDGET || 3200);
+  const tpmSafeTotal = Number(process.env.GROQ_CHAT_TPM_SAFE || 4800);
+  const userBudget = Math.max(1200, requestCharBudget - systemLen);
+  let userContent =
+    typeof user === "string"
+      ? truncateText(user, userBudget)
+      : truncateUserPayload(user, userBudget);
+
+  if (Array.isArray(userContent)) {
+    while (userContent.some((part) => part?.type === "image_url")) {
+      const inputChars = systemLen + userPayloadCharLength(userContent);
+      try {
+        capOutputTokens(inputChars, maxTokens, tpmSafeTotal);
+        break;
+      } catch {
+        const lastImageIndex = userContent
+          .map((part, index) => (part?.type === "image_url" ? index : -1))
+          .reduce((a, b) => Math.max(a, b), -1);
+        if (lastImageIndex < 0) break;
+        userContent = userContent.filter((_, index) => index !== lastImageIndex);
+      }
+    }
+    userContent = truncateUserPayload(userContent, userBudget);
+  }
+
+  const inputChars = systemLen + userPayloadCharLength(userContent);
+  const cappedOutput = capOutputTokens(inputChars, maxTokens, tpmSafeTotal);
+  return { userContent, inputChars, cappedOutput };
+}
+
+function capOutputTokens(inputChars, requestedOutput, tpmSafeTotalOverride) {
   const { maxOutputTokens, tpmSafeTotal } = groqConfig();
+  const safeTotal = tpmSafeTotalOverride ?? tpmSafeTotal;
   const inputTokens = estimateTokens(inputChars);
-  const room = tpmSafeTotal - inputTokens - 150;
+  const room = safeTotal - inputTokens - 150;
   const capped = Math.min(requestedOutput, maxOutputTokens, room);
   if (capped < 256) {
     throw new GroqError(
@@ -328,17 +360,20 @@ export async function groqText({
   maxTokens = 500,
   apiKey: apiKeyOverride,
   agentKey,
+  chatMode = false,
 }) {
   const provider = agentKey ? agentGroqConfig(agentKey) : groqConfig();
   const apiKey = apiKeyOverride || provider.apiKey;
   const model = modelOverride || provider.model || provider.plannerModel;
-  const { maxOutputTokens, requestCharBudget } = provider;
   if (!apiKey) {
     throw new GroqError("GROQ_API_KEY is not configured");
   }
 
-  const systemContent = truncateText(system, 2800);
-  const { userContent, cappedOutput } = fitUserPayload(systemContent.length, user, maxTokens);
+  const systemCap = chatMode ? 1400 : 2800;
+  const systemContent = truncateText(system, systemCap);
+  const { userContent, cappedOutput } = chatMode
+    ? fitChatPayload(systemContent.length, user, maxTokens)
+    : fitUserPayload(systemContent.length, user, maxTokens);
 
   await groqThrottle();
 

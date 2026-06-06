@@ -26,6 +26,7 @@ import {
   greetingReply,
   isGreeting,
   matchChatIntent,
+  pickChatFileContents,
 } from "../chatIntents.js";
 import {
   fetchSession,
@@ -246,6 +247,7 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
       label: s.title,
       agent: s.agent,
       description: s.description,
+      branchPrompt: String(s.description || "").trim(),
       status: stepStatus[s.id] || agentStatus[s.agent] || "planned",
       isSubagent: Boolean(stepStatus[s.id]),
     },
@@ -295,6 +297,133 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
       return { ...n, position: { x: x - 80, y: y - 25 } };
     }),
     edges,
+  };
+}
+
+function prefixExecGraph(laid, prefix = "exec:") {
+  const idMap = new Map(laid.nodes.map((n) => [n.id, `${prefix}${n.id}`]));
+  return {
+    nodes: laid.nodes.map((n) => ({ ...n, id: idMap.get(n.id) })),
+    edges: laid.edges.map((e) => ({
+      ...e,
+      id: `${prefix}${e.id}`,
+      source: idMap.get(e.source) || e.source,
+      target: idMap.get(e.target) || e.target,
+    })),
+  };
+}
+
+function layoutSubagentNodes(subagents, execNodes) {
+  const nodes = [];
+  const edges = [];
+  const byStep = new Map();
+  for (const sa of subagents) {
+    if (!byStep.has(sa.stepId)) byStep.set(sa.stepId, []);
+    byStep.get(sa.stepId).push(sa);
+  }
+
+  for (const [stepId, list] of byStep) {
+    const parent = execNodes.find((n) => n.id === `exec:${stepId}`);
+    if (!parent) continue;
+    list.forEach((sa, index) => {
+      const status =
+        sa.status === "complete" ? "complete" : sa.status === "running" ? "running" : "ready";
+      nodes.push({
+        id: sa.id,
+        type: "execStep",
+        data: {
+          label: sa.title,
+          agent: sa.displayName || sa.parentAgent,
+          branchPrompt: sa.model ? `Groq · ${String(sa.model).split("/").pop()}` : "",
+          status,
+          isSubagent: true,
+        },
+        position: {
+          x: parent.position.x + index * 24,
+          y: parent.position.y + 78 + index * 12,
+        },
+        style: { background: "transparent", border: "none", padding: 0 },
+      });
+      edges.push({
+        id: `sub-${sa.id}`,
+        source: parent.id,
+        target: sa.id,
+        animated: sa.status === "running",
+        style: { stroke: CRT.textDim, strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: CRT.textDim },
+      });
+    });
+  }
+
+  return { nodes, edges };
+}
+
+/** Cumulative graph: hyperreasoning branches (incl. pruned) + execution plan + subagents. */
+function layoutMegaGraph({
+  rawSearchNodes = [],
+  rawSearchEdges = [],
+  bestPath = [],
+  winnerId = null,
+  planSteps = [],
+  stepStatus = {},
+  agentStatus = {},
+  subagents = [],
+}) {
+  const searchLaid = layoutSearchGraph(rawSearchNodes, rawSearchEdges, bestPath);
+  if (!planSteps.length) {
+    const subLaid = layoutSubagentNodes(subagents, []);
+    return {
+      nodes: [...searchLaid.nodes, ...subLaid.nodes],
+      edges: [...searchLaid.edges, ...subLaid.edges],
+    };
+  }
+
+  const execLaidRaw = layoutGraph(planSteps, agentStatus, stepStatus, "TB");
+  const execLaid = prefixExecGraph(execLaidRaw);
+
+  let maxX = 0;
+  let minY = 0;
+  let maxY = 0;
+  for (const node of searchLaid.nodes) {
+    maxX = Math.max(maxX, node.position.x + 280);
+    minY = Math.min(minY, node.position.y);
+    maxY = Math.max(maxY, node.position.y + 120);
+  }
+
+  const offsetX = maxX + 100;
+  const centerY = searchLaid.nodes.length ? (minY + maxY) / 2 : 0;
+
+  let execMinY = Infinity;
+  let execMaxY = -Infinity;
+  for (const node of execLaid.nodes) {
+    execMinY = Math.min(execMinY, node.position.y);
+    execMaxY = Math.max(execMaxY, node.position.y);
+  }
+  const execMidY = Number.isFinite(execMinY) ? (execMinY + execMaxY) / 2 : 0;
+  const offsetY = centerY - execMidY;
+
+  const execNodes = execLaid.nodes.map((n) => ({
+    ...n,
+    position: { x: n.position.x + offsetX, y: n.position.y + offsetY },
+  }));
+
+  const bridgeFrom = winnerId || bestPath[bestPath.length - 1] || "root";
+  const entrySteps = planSteps.filter((step) => !(step.dependsOn || []).length);
+  const bridgeTargets = entrySteps.length ? entrySteps : [planSteps[0]];
+  const bridgeEdges = bridgeTargets.map((step) => ({
+    id: `bridge-${bridgeFrom}-${step.id}`,
+    source: bridgeFrom,
+    target: `exec:${step.id}`,
+    animated: true,
+    style: { stroke: CRT.textSoft, strokeDasharray: "8 5", strokeWidth: 2 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: CRT.textSoft },
+  }));
+
+  const subLaid = layoutSubagentNodes(subagents, execNodes);
+
+  return {
+    nodes: [...searchLaid.nodes, ...execNodes, ...subLaid.nodes],
+    edges: [...searchLaid.edges, ...bridgeEdges, ...execLaid.edges, ...subLaid.edges],
   };
 }
 
@@ -403,10 +532,14 @@ function App() {
   const searchNodesRef = useRef([]);
   const searchEdgesRef = useRef([]);
   const bestPathRef = useRef([]);
+  const searchWinnerRef = useRef(null);
   const searchGraphRef = useRef({ nodes: [], edges: [] });
+  const megaGraphRef = useRef({ nodes: [], edges: [] });
   const searchPhaseRef = useRef("idle");
   const executionGraphRef = useRef({ nodes: [], edges: [] });
   const stepStatusRef = useRef({});
+  const agentStatusRef = useRef({});
+  const subagentNodesRef = useRef([]);
   const planStepsRef = useRef([]);
   const promptInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -430,51 +563,44 @@ function App() {
     searchPhaseRef.current = searchPhase;
   }, [searchPhase]);
 
-  const paintSearchGraph = useCallback(
-    () => {
-      const laid = layoutSearchGraph(
-        searchNodesRef.current,
-        searchEdgesRef.current,
-        bestPathRef.current
-      );
-      searchGraphRef.current = laid;
-      setSearchGraphData({
-        branches: [...searchNodesRef.current],
-        edges: [...searchEdgesRef.current],
-        bestPath: [...bestPathRef.current],
-      });
-      setNodes(laid.nodes);
-      setEdges(laid.edges);
-    },
-    [setNodes, setEdges]
-  );
+  useEffect(() => {
+    searchWinnerRef.current = searchWinner;
+  }, [searchWinner]);
 
-  const hydrateExecutionGraph = useCallback(
-    (steps, { agentStatus = {}, stepStatus = stepStatusRef.current } = {}) => {
-      planStepsRef.current = steps;
-      const laid = layoutGraph(steps, agentStatus, stepStatus);
-      executionGraphRef.current = laid;
-      setPlanSteps(steps);
-      return laid;
-    },
-    []
-  );
-
-  const paintExecutionGraph = useCallback((agentStatus = {}) => {
-    const steps = planStepsRef.current;
-    if (!steps?.length) return;
-    const laid = layoutGraph(steps, agentStatus, stepStatusRef.current);
-    executionGraphRef.current = laid;
-    if (searchPhaseRef.current !== "searching") {
-      setNodes(laid.nodes);
-      setEdges(laid.edges);
-    }
+  const paintMegaGraph = useCallback(() => {
+    const laid = layoutMegaGraph({
+      rawSearchNodes: searchNodesRef.current,
+      rawSearchEdges: searchEdgesRef.current,
+      bestPath: bestPathRef.current,
+      winnerId: searchWinnerRef.current,
+      planSteps: planStepsRef.current,
+      stepStatus: { ...stepStatusRef.current },
+      agentStatus: { ...agentStatusRef.current },
+      subagents: subagentNodesRef.current,
+    });
+    megaGraphRef.current = laid;
+    searchGraphRef.current = laid;
+    setSearchGraphData({
+      branches: [...searchNodesRef.current],
+      edges: [...searchEdgesRef.current],
+      bestPath: [...bestPathRef.current],
+    });
+    setNodes(laid.nodes);
+    setEdges(laid.edges);
   }, [setNodes, setEdges]);
+
+  const hydrateExecutionGraph = useCallback((steps, { agentStatus = {} } = {}) => {
+    planStepsRef.current = steps;
+    agentStatusRef.current = { ...agentStatusRef.current, ...agentStatus };
+    setPlanSteps(steps);
+  }, []);
 
   const swarmHandlers = useCallback(
     () => ({
       "run-started": ({ runId }) => {
         stepStatusRef.current = {};
+        agentStatusRef.current = {};
+        subagentNodesRef.current = [];
         setStatus((current) => ({ ...current, runId, runPath: "" }));
       },
       "search-started": ({ subtitle }) => {
@@ -484,11 +610,18 @@ function App() {
         searchNodesRef.current = [];
         searchEdgesRef.current = [];
         bestPathRef.current = [];
+        searchWinnerRef.current = null;
         searchGraphRef.current = { nodes: [], edges: [] };
+        megaGraphRef.current = { nodes: [], edges: [] };
+        stepStatusRef.current = {};
+        agentStatusRef.current = {};
+        subagentNodesRef.current = [];
+        planStepsRef.current = [];
         setSearchVerdict(null);
         setSearchComparisons([]);
         setSearchSavings(null);
         setSearchWinner(null);
+        setPlanSteps([]);
         setNodes([]);
         setEdges([]);
         appendSearchLog("Hyperreasoning search started");
@@ -504,11 +637,11 @@ function App() {
         } else {
           appendSearchLog(`Branch: ${node.title} (${node.shortSummary || "candidate"})`);
         }
-        paintSearchGraph();
+        paintMegaGraph();
       },
       "search-edge": ({ parentId, childId }) => {
         searchEdgesRef.current = [...searchEdgesRef.current, { parentId, childId }];
-        paintSearchGraph();
+        paintMegaGraph();
       },
       "search-scored": ({ id, score, rank, breakdown }) => {
         const hit = searchNodesRef.current.find((node) => node.id === id);
@@ -526,7 +659,7 @@ function App() {
             : node
         );
         appendSearchLog(`Scored ${hit?.title || id}: ${score} (rank #${rank})`);
-        paintSearchGraph();
+        paintMegaGraph();
       },
       "search-node-status": ({ nodeId, status: nodeStatus }) => {
         const hit = searchNodesRef.current.find((node) => node.id === nodeId);
@@ -534,7 +667,7 @@ function App() {
           node.id === nodeId ? { ...node, status: nodeStatus } : node
         );
         appendSearchLog(`${hit?.title || nodeId} → ${nodeStatus}`);
-        paintSearchGraph();
+        paintMegaGraph();
       },
       "search-pruned": ({ nodeId, reason }) => {
         const hit = searchNodesRef.current.find((node) => node.id === nodeId);
@@ -542,13 +675,16 @@ function App() {
           node.id === nodeId ? { ...node, status: "PRUNED", pruneReason: reason } : node
         );
         appendSearchLog(`Pruned ${hit?.title || nodeId}: ${reason || "lower score"}`);
-        paintSearchGraph();
+        paintMegaGraph();
       },
       "search-best-path": ({ nodeIds, winnerId }) => {
         bestPathRef.current = nodeIds || [];
-        if (winnerId) setSearchWinner(winnerId);
+        if (winnerId) {
+          searchWinnerRef.current = winnerId;
+          setSearchWinner(winnerId);
+        }
         appendSearchLog(`Best path locked → ${(nodeIds || []).join(" → ")}`);
-        paintSearchGraph();
+        paintMegaGraph();
       },
       "search-finished": ({ summary, winnerId, verdict, savings, comparisons }) => {
         if (summary) setPlanSummary(summary);
@@ -567,7 +703,7 @@ function App() {
               pruneReason: row.pruneReason || node.pruneReason,
             };
           });
-          paintSearchGraph();
+          paintMegaGraph();
         }
         if (savings) setSearchSavings(savings);
         appendSearchLog(`Winner selected. Plan: ${summary || "ready"}`);
@@ -580,13 +716,28 @@ function App() {
       "graph-ready": ({ steps, summary }) => {
         if (summary) setPlanSummary(summary);
         stepStatusRef.current = {};
-        const laid = hydrateExecutionGraph(steps || []);
-        setNodes(laid.nodes);
-        setEdges(laid.edges);
+        subagentNodesRef.current = [];
+        hydrateExecutionGraph(steps || []);
+        paintMegaGraph();
       },
       "subagent-spawned": ({ displayName, stepTitle, stepId, model, stepIndex, stepCount, parentAgent }) => {
         if (stepId) stepStatusRef.current[stepId] = "running";
-        paintExecutionGraph({ [parentAgent]: "running" });
+        if (parentAgent) agentStatusRef.current[parentAgent] = "running";
+        const subId = `sub:${parentAgent}:${stepId}:${stepIndex ?? subagentNodesRef.current.length}`;
+        subagentNodesRef.current = [
+          ...subagentNodesRef.current.filter((item) => item.id !== subId),
+          {
+            id: subId,
+            stepId,
+            title: stepTitle,
+            displayName,
+            model,
+            parentAgent,
+            status: "running",
+            stepIndex,
+          },
+        ];
+        paintMegaGraph();
         const shortModel = String(model || "").split("/").pop() || model;
         appendChat(
           "system",
@@ -595,14 +746,22 @@ function App() {
       },
       "subagent-status": ({ stepId, status: subStatus, message, parentAgent }) => {
         if (stepId && subStatus) stepStatusRef.current[stepId] = subStatus;
-        paintExecutionGraph(parentAgent ? { [parentAgent]: "running" } : {});
+        if (parentAgent) agentStatusRef.current[parentAgent] = "running";
+        subagentNodesRef.current = subagentNodesRef.current.map((item) =>
+          item.stepId === stepId ? { ...item, status: subStatus || item.status } : item
+        );
+        paintMegaGraph();
         if (message && subStatus === "running") {
           appendSearchLog(`Subagent ${message}`);
         }
       },
       "subagent-complete": ({ stepId, displayName, files, parentAgent, model }) => {
         if (stepId) stepStatusRef.current[stepId] = "complete";
-        paintExecutionGraph({ [parentAgent]: "running" });
+        if (parentAgent) agentStatusRef.current[parentAgent] = "running";
+        subagentNodesRef.current = subagentNodesRef.current.map((item) =>
+          item.stepId === stepId ? { ...item, status: "complete", model: model || item.model } : item
+        );
+        paintMegaGraph();
         appendChat(
           "agent",
           `${displayName || parentAgent} subagent done → ${(files || []).join(", ") || "files updated"}`,
@@ -611,10 +770,14 @@ function App() {
       },
       "agent-status": ({ agent, status: agentStatus }) => {
         if (agentStatus === "running") {
+          agentStatusRef.current[agent] = "running";
           setRunningAgents((current) => [...new Set([...current, agent])]);
+          paintMegaGraph();
         }
         if (agentStatus === "complete" || agentStatus === "error") {
+          agentStatusRef.current[agent] = agentStatus === "complete" ? "complete" : "error";
           setRunningAgents((current) => current.filter((item) => item !== agent));
+          paintMegaGraph();
         }
       },
       "agent-started": ({ agent, filename }) => {
@@ -682,7 +845,7 @@ function App() {
         );
       },
     }),
-    [setNodes, paintSearchGraph, hydrateExecutionGraph, paintExecutionGraph, appendChat, appendSearchLog]
+    [setNodes, paintMegaGraph, hydrateExecutionGraph, appendChat, appendSearchLog]
   );
 
   useEffect(() => {
@@ -1000,7 +1163,6 @@ function App() {
         );
       }
       if (session.searchLog?.length) setSearchLog(session.searchLog);
-      if (session.searchWinner) setSearchWinner(session.searchWinner);
       if (session.searchVerdict) setSearchVerdict(session.searchVerdict);
       if (session.searchComparisons?.length) setSearchComparisons(session.searchComparisons);
       if (session.searchSavings) setSearchSavings(session.searchSavings);
@@ -1009,15 +1171,16 @@ function App() {
         searchEdgesRef.current = session.searchGraphData.edges || [];
         bestPathRef.current = session.searchGraphData.bestPath || [];
         setSearchGraphData(session.searchGraphData);
-        const laid = layoutSearchGraph(
-          searchNodesRef.current,
-          searchEdgesRef.current,
-          bestPathRef.current
-        );
-        searchGraphRef.current = laid;
+      }
+      if (session.searchWinner) {
+        setSearchWinner(session.searchWinner);
+        searchWinnerRef.current = session.searchWinner;
       }
       if (session.planSummary) setPlanSummary(session.planSummary);
-      if (session.planSteps?.length) setPlanSteps(session.planSteps);
+      if (session.planSteps?.length) {
+        setPlanSteps(session.planSteps);
+        planStepsRef.current = session.planSteps;
+      }
       const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
       if (session.githubRepo) {
         setGithubRepo(session.githubRepo);
@@ -1097,6 +1260,13 @@ function App() {
   }, [hydrateExecutionGraph, loadRepoIntoWorkspace]);
 
   useEffect(() => {
+    if (!sessionReady) return;
+    if (searchNodesRef.current.length || planStepsRef.current.length) {
+      paintMegaGraph();
+    }
+  }, [sessionReady, paintMegaGraph]);
+
+  useEffect(() => {
     if (stage !== "ide" || !githubRepo || githubRepo.source !== "existing") return;
     if (Object.keys(fileSystem).length > 0) return;
     const key = githubRepo.fullName;
@@ -1170,9 +1340,9 @@ function App() {
   useEffect(() => {
     if (stage !== "ide" || Object.keys(fileSystem).length === 0) return;
     if (searchPhase === "searching") return;
-    if (searchGraphRef.current.nodes.length && nodes.length === 0) {
-      setNodes(searchGraphRef.current.nodes);
-      setEdges(searchGraphRef.current.edges);
+    if (megaGraphRef.current.nodes.length && nodes.length === 0) {
+      setNodes(megaGraphRef.current.nodes);
+      setEdges(megaGraphRef.current.edges);
     }
   }, [stage, fileSystem, nodes.length, searchPhase, setNodes, setEdges]);
 
@@ -1387,8 +1557,14 @@ function App() {
     searchNodesRef.current = [];
     searchEdgesRef.current = [];
     bestPathRef.current = [];
+    searchWinnerRef.current = null;
     searchGraphRef.current = { nodes: [], edges: [] };
+    megaGraphRef.current = { nodes: [], edges: [] };
     executionGraphRef.current = { nodes: [], edges: [] };
+    stepStatusRef.current = {};
+    agentStatusRef.current = {};
+    subagentNodesRef.current = [];
+    planStepsRef.current = [];
     setSearchGraphData({ branches: [], edges: [], bestPath: [] });
     setNodes([]);
     setEdges([]);
@@ -1485,7 +1661,13 @@ function App() {
       searchNodesRef.current = [];
       searchEdgesRef.current = [];
       bestPathRef.current = [];
+      searchWinnerRef.current = null;
+      planStepsRef.current = [];
+      stepStatusRef.current = {};
+      agentStatusRef.current = {};
+      subagentNodesRef.current = [];
       executionGraphRef.current = { nodes: [], edges: [] };
+      megaGraphRef.current = { nodes: [], edges: [] };
       setNodes([]);
       setEdges([]);
       setStatus((current) => ({ ...current, error: "" }));
@@ -1645,33 +1827,36 @@ function App() {
       return;
     }
 
-    const fileContents = Object.entries(fileSystem)
-      .filter(([, entry]) => {
-        if (chatTarget === "altbot") return true;
-        return entry?.agent === chatTarget;
-      })
-      .slice(0, chatTarget === "altbot" ? 2 : 1)
-      .map(([filename, entry]) => ({
-        filename,
-        code: String(entry?.code || "").slice(0, chatTarget === "altbot" ? 500 : 800),
-      }));
-    const inspoSelection = inspoCandidates
-      .filter((img) => inspoSelectedIds.includes(img.id))
-      .map(({ id, title, url, source, thumbUrl }) => ({ id, title, url, source, thumbUrl }));
+    const fileContents = pickChatFileContents(fileSystem, chatTarget);
+    const inspoSelection =
+      chatTarget === "Frontend"
+        ? inspoCandidates
+            .filter((img) => inspoSelectedIds.includes(img.id))
+            .map(({ id, title, url, source, thumbUrl }) => ({ id, title, url, source, thumbUrl }))
+        : [];
 
     try {
       const reply = await postChat({
         message: text,
         target: chatTarget,
         context: {
-          prompt,
-          planSummary: hasFiles ? planSummary : "",
+          prompt: hasFiles ? String(prompt || "").slice(0, 400) : "",
+          planSummary: hasFiles ? String(planSummary || "").slice(0, 400) : "",
           searchWinner: hasFiles ? searchWinner : null,
           selectedAgents: selected,
-          files: Object.keys(fileSystem),
+          files: Object.keys(fileSystem).slice(0, 24),
           fileContents,
-          searchBranches: hasFiles ? searchGraphData.branches : [],
-          searchLog: hasFiles ? searchLog.map((line) => line.text) : [],
+          searchBranches:
+            chatTarget === "altbot" && hasFiles
+              ? searchGraphData.branches.slice(0, 4).map(({ id, title, status, shortSummary, score, rank }) => ({
+                  id,
+                  title,
+                  status,
+                  shortSummary,
+                  score,
+                  rank,
+                }))
+              : [],
           inspoSelection,
         },
       });
@@ -1690,7 +1875,6 @@ function App() {
     selected,
     fileSystem,
     searchGraphData.branches,
-    searchLog,
     inspoCandidates,
     inspoSelectedIds,
     clearWorkspace,
@@ -1718,20 +1902,19 @@ function App() {
 
   const showSearchGraph = useCallback(() => {
     setBottomPanelTab("graph");
-    paintSearchGraph();
-  }, [paintSearchGraph]);
+    paintMegaGraph();
+  }, [paintMegaGraph]);
 
   const launchFromIntro = useCallback(() => setStage("repo"), []);
   const resumeFromIntro = useCallback(() => {
     const target =
       savedSession?.stage && savedSession.stage !== "intro" ? savedSession.stage : "ide";
     setStage(target);
-    if (searchGraphRef.current.nodes.length) {
-      setNodes(searchGraphRef.current.nodes);
-      setEdges(searchGraphRef.current.edges);
+    if (megaGraphRef.current.nodes.length || searchNodesRef.current.length) {
+      paintMegaGraph();
       setBottomPanelTab("graph");
     }
-  }, [savedSession, setNodes, setEdges]);
+  }, [savedSession, paintMegaGraph]);
 
   const goHome = useCallback(() => setStage("intro"), []);
 
@@ -4142,7 +4325,7 @@ function App() {
                           <div className="graph-empty">Run a swarm to see Altbot&apos;s hyperreasoning graph</div>
                         ) : (
                           <ReactFlow
-                            key={`flow-${nodes.length}`}
+                            key="mega-reasoning-graph"
                             nodes={nodes}
                             edges={edges}
                             nodeTypes={flowNodeTypes}

@@ -1,3 +1,57 @@
+export function agentMatchesFile(agentField, targetId) {
+  const agent = String(agentField || "").toLowerCase();
+  const target = String(targetId || "").toLowerCase();
+  if (target === "altbot") return true;
+  if (target === "backend") return agent === "backend";
+  if (target === "frontend") return agent === "frontend";
+  if (target === "database") return agent === "database";
+  return agent === target;
+}
+
+/** Files to attach for agent chat — case-insensitive agent match + a few cross-lane hints. */
+export function pickChatFileContents(
+  fileSystem = {},
+  targetId,
+  { maxFiles = 3, maxCharsPerFile = 1800 } = {}
+) {
+  const entries = Object.entries(fileSystem);
+  const target = String(targetId || "").toLowerCase();
+  const seen = new Set();
+  const picked = [];
+
+  const push = (filename, entry) => {
+    if (!filename || seen.has(filename) || picked.length >= maxFiles) return;
+    seen.add(filename);
+    picked.push({
+      filename,
+      code: String(entry?.code || "").slice(0, maxCharsPerFile),
+    });
+  };
+
+  for (const [filename, entry] of entries) {
+    if (agentMatchesFile(entry?.agent, targetId)) push(filename, entry);
+  }
+
+  if (target === "backend") {
+    for (const [filename, entry] of entries) {
+      if (/server\.js|route|controller|middleware/i.test(filename)) push(filename, entry);
+    }
+    for (const [filename, entry] of entries) {
+      if (/App\.jsx|index\.html|page/i.test(filename)) push(filename, entry);
+    }
+  } else if (target === "frontend") {
+    for (const [filename, entry] of entries) {
+      if (/App\.jsx|\.tsx|\.css|component|index\.html/i.test(filename)) push(filename, entry);
+    }
+  } else if (target === "database") {
+    for (const [filename, entry] of entries) {
+      if (/\.sql|schema|migration|seed/i.test(filename)) push(filename, entry);
+    }
+  }
+
+  return picked;
+}
+
 export function isGreeting(message) {
   const text = String(message || "").trim();
   return /^(hi|hello|hey|howdy|yo|sup|what'?s up|gm)[\s!.?]*$/i.test(text);
@@ -6,12 +60,7 @@ export function isGreeting(message) {
 export function greetingReply(agentKey, { files = [], fileSystem = {} } = {}) {
   const mine = files.filter((name) => {
     const entry = fileSystem[name];
-    if (!entry?.agent) return false;
-    const agent = String(entry.agent).toLowerCase();
-    if (agentKey === "backend") return agent === "backend";
-    if (agentKey === "frontend") return agent === "frontend";
-    if (agentKey === "database") return agent === "database";
-    return false;
+    return entry?.agent && agentMatchesFile(entry.agent, agentKey);
   });
 
   const fileHint = mine.length ? ` I'm looking at ${mine.join(", ")}.` : files.length ? "" : " No files in session yet — run a swarm first.";

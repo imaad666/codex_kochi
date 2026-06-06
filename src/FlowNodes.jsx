@@ -76,11 +76,18 @@ export function PlanBranchNode({ data }) {
 
 export function ExecStepNode({ data }) {
   const status = data.status || "planned";
+  const promptText = String(data.branchPrompt || data.description || "").trim();
   return (
-    <div className="flow-node exec-node">
+    <div className={`flow-node exec-node ${data.isSubagent ? "subagent-node" : ""}`}>
       <Handle type="target" position={Position.Top} style={{ opacity: 0.35 }} />
       <div className="flow-node-title">{data.label}</div>
       {data.agent ? <div className="flow-node-meta">{data.agent}{data.isSubagent ? " · subagent" : ""}</div> : null}
+      {promptText ? (
+        <div className="flow-node-prompt-block">
+          <div className="flow-node-prompt-label">{data.isSubagent ? "Model" : "Step"}</div>
+          <div className="flow-node-prompt">{promptText}</div>
+        </div>
+      ) : null}
       <div className={`flow-node-badge status-${status}`}>{status.toUpperCase()}</div>
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0.35 }} />
     </div>

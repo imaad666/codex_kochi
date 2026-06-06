@@ -842,35 +842,47 @@ async function handleChatSend({ message, target = "altbot", context = {} }) {
     };
   }
 
-  const branchLines = (context.searchBranches || [])
-    .map(
-      (branch) =>
-        `- ${branch.title || branch.id} [${branch.status || "IDLE"}] score=${branch.score ?? "?"} rank=#${branch.rank ?? "?"} strategy=${branch.shortSummary || branch.strategy || ""}`
-    )
-    .join("\n");
-  const fileLines = (context.fileContents || [])
-    .map((file) => `// ${file.filename}\n${String(file.code || "").slice(0, 1200)}`)
-    .join("\n\n")
-    .slice(0, 3000);
   const inspoItems = (context.inspoSelection || []).filter((item) => item?.url);
-  const inspoTitles = inspoItems.map((item) => item.title || item.id).filter(Boolean).slice(0, 6);
-  const inspoLine = inspoTitles.length
-    ? `Inspo board (${inspoTitles.length} pinned): ${inspoTitles.join(", ")}. Treat these as the visual direction for UI styling.`
-    : "";
+  const inspoTitles = inspoItems.map((item) => item.title || item.id).filter(Boolean).slice(0, 4);
+  const inspoLine =
+    agentName === "Frontend" && inspoTitles.length
+      ? `Inspo board (${inspoTitles.length} pinned): ${inspoTitles.join(", ")}.`
+      : "";
+
+  const fileLines = (context.fileContents || [])
+    .slice(0, 3)
+    .map((file) => `// ${file.filename}\n${String(file.code || "").slice(0, 1800)}`)
+    .join("\n\n")
+    .slice(0, 4200);
+
+  const fileNames = (context.files || []).slice(0, 24);
+  const planHint = truncateText(String(context.planSummary || ""), 320);
+  const buildHint = truncateText(String(context.prompt || ""), 360);
+  const winnerId = context.searchWinner ? String(context.searchWinner) : "";
+  const branchLines =
+    agentName === "altbot"
+      ? (context.searchBranches || [])
+          .slice(0, 4)
+          .map(
+            (branch) =>
+              `- ${branch.title || branch.id} [${branch.status || "IDLE"}] ${branch.shortSummary || branch.strategy || ""}`
+          )
+          .join("\n")
+      : winnerId
+        ? `Winning branch id: ${winnerId}`
+        : "";
 
   try {
     const provider = agentGroqConfig(isAgent ? agentName : "altbot");
     const chatText = [
-      `Respond to this user message directly. Background context is reference only — do not ignore the question.`,
+      `Answer the user's message directly in 1-3 sentences.`,
       `User message: ${text}`,
-      context.prompt ? `Original build prompt: ${context.prompt}` : "",
-      context.planSummary ? `Background plan (only if relevant): ${context.planSummary}` : "",
-      context.searchWinner ? `Hyperreasoning winner id: ${context.searchWinner}` : "",
-      branchLines ? `Hyperreasoning branches:\n${branchLines}` : "",
-      context.files?.length ? `Project files: ${context.files.join(", ")}` : "",
       fileLines ? `Relevant code:\n${fileLines}` : "",
-      context.searchLog?.length ? `Search log:\n${context.searchLog.slice(-8).join("\n")}` : "",
-      context.selectedAgents?.length ? `Active swarm: ${context.selectedAgents.join(", ")}` : "",
+      fileNames.length ? `Project files (${fileNames.length}): ${fileNames.join(", ")}` : "",
+      isAgent ? "" : buildHint ? `Original build prompt (summary): ${buildHint}` : "",
+      planHint ? `Plan summary: ${planHint}` : "",
+      branchLines ? `Hyperreasoning:\n${branchLines}` : "",
+      context.selectedAgents?.length ? `Swarm agents: ${context.selectedAgents.join(", ")}` : "",
       inspoLine,
     ]
       .filter(Boolean)
@@ -878,7 +890,7 @@ async function handleChatSend({ message, target = "altbot", context = {} }) {
 
     let userPayload = chatText;
     if (agentName === "Frontend" && inspoItems.length) {
-      const inspoImages = await resolveInspoAttachments(inspoItems, { max: 1, maxBytes: 90_000 });
+      const inspoImages = await resolveInspoAttachments(inspoItems, { max: 1, maxBytes: 60_000 });
       if (inspoImages.length) {
         userPayload = attachmentContent(chatText, inspoImages, { includeImages: true });
       }
@@ -887,18 +899,23 @@ async function handleChatSend({ message, target = "altbot", context = {} }) {
     const reply = await groqText({
       system: isAgent ? agentChatSystem(agentName) : ALTBOT_CHAT_SYSTEM,
       user: userPayload,
-      maxTokens: 220,
+      maxTokens: agentName === "Backend" ? 480 : 280,
       temperature: 0.4,
       model: provider.model,
       apiKey: provider.apiKey,
       agentKey: isAgent ? agentName : "altbot",
+      chatMode: true,
     });
     return { role: replyRole, agent: replyAgent, text: reply };
   } catch (error) {
+    const chatHint =
+      error instanceof GroqError
+        ? "Chat context was too large — try a shorter question, or switch to Code mode for big changes."
+        : "Chat failed unexpectedly.";
     return {
       role: replyRole,
       agent: replyAgent,
-      text: error instanceof GroqError ? error.message : "Chat failed unexpectedly.",
+      text: error instanceof GroqError ? chatHint : error.message || chatHint,
     };
   }
 }
