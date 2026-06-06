@@ -169,12 +169,24 @@ export const introCss = `
     margin: 0 auto;
   }
   .intro-slide.cards-slide {
-    padding: 0.5rem 2.75rem 0.5rem 0.75rem;
+    align-items: stretch;
+    padding: 1rem 3.25rem 1rem 1rem;
   }
   .intro-slide.cards-slide .intro-slide-inner {
-    max-width: min(100%, 980px);
+    max-width: none;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
     justify-content: center;
-    gap: 0.5rem;
+    overflow-y: auto;
+  }
+  .intro-slide.cards-slide .intro-section-head h2 {
+    font-size: clamp(36px, 5.5vw, 52px);
+    letter-spacing: 4px;
+  }
+  .intro-slide.cards-slide .intro-section-head p {
+    font-size: clamp(22px, 3vw, 28px);
+    margin-top: 0.75rem;
   }
   .intro-nav {
     position: absolute;
@@ -539,21 +551,18 @@ export const introCss = `
     width: 100%;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: clamp(0.35rem, 0.8vh, 0.6rem);
-    overflow: hidden;
-    flex: 1;
-    min-height: 0;
-    align-content: center;
+    gap: clamp(0.65rem, 1.5vw, 1.25rem);
   }
   .intro-showcase-card {
     min-width: 0;
     display: flex;
     flex-direction: column;
     color: ${CRT.textDim};
-    min-height: 0;
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .intro-showcase-card:hover {
-    transform: none;
+    transform: translateY(-8px) scale(1.02);
+    z-index: 2;
   }
   .intro-showcase-card .card-frame {
     display: block;
@@ -561,11 +570,11 @@ export const introCss = `
     overflow: hidden;
     width: 100%;
     border: 2px solid ${CRT.textDim};
-    border-radius: 10px;
+    border-radius: 14px;
     background: #00000024;
-    box-shadow: inset 0 0 12px #00000030;
+    box-shadow: inset 0 0 18px #00000030;
     aspect-ratio: 0.72;
-    max-height: 22vh;
+    transition: border-color 0.3s, box-shadow 0.3s;
   }
   .intro-showcase-card:hover .card-frame {
     border-color: ${CRT.text};
@@ -583,6 +592,11 @@ export const introCss = `
     object-fit: cover;
     object-position: center;
     filter: saturate(0.85) contrast(1.05);
+    transition: transform 0.5s ease, filter 0.3s;
+  }
+  .intro-showcase-card:hover .card-image {
+    transform: scale(1.06);
+    filter: saturate(1) contrast(1.08);
   }
   .intro-showcase-card.locked .card-image {
     filter: saturate(1) contrast(1.02);
@@ -602,32 +616,41 @@ export const introCss = `
   .intro-showcase-card .card-copy {
     display: block;
     flex: 1;
-    margin-top: 4px;
+    margin-top: 8px;
     min-height: 0;
-    padding: 6px 8px 8px;
+    padding: 10px 12px 12px;
     border: 2px solid ${CRT.textDim};
-    border-radius: 8px;
+    border-radius: 10px;
     background: #133f3fcc;
-    box-shadow: inset 0 0 10px #00000028;
+    box-shadow: inset 0 0 14px #00000028;
     text-transform: uppercase;
-    overflow: hidden;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .intro-showcase-card:hover .card-copy {
+    border-color: ${CRT.textDim};
+    background: #1a5050dd;
   }
   .intro-showcase-card .card-name {
     display: block;
     color: ${CRT.textSoft};
-    font-size: clamp(14px, 2vh, 20px);
+    font-size: clamp(22px, 2.4vw, 30px);
     line-height: 1;
-    text-shadow: 0 0 6px #dfff3f44;
+    text-shadow: 0 0 9px #dfff3f66;
   }
   .intro-showcase-card .card-role {
     display: block;
-    margin-top: 3px;
+    margin-top: 5px;
     color: ${CRT.text};
-    font-size: clamp(11px, 1.4vh, 14px);
-    letter-spacing: 0.5px;
+    font-size: clamp(16px, 1.6vw, 20px);
+    letter-spacing: 1px;
   }
   .intro-showcase-card .card-blurb {
-    display: none;
+    display: block;
+    margin-top: 8px;
+    color: ${CRT.textSoft};
+    font-size: clamp(14px, 1.35vw, 17px);
+    line-height: 1.35;
+    text-transform: none;
   }
   .intro-flow-list {
     display: flex;
