@@ -16,6 +16,7 @@ import dagre from "dagre";
 import { AGENT_CARDS } from "./agentCards.js";
 import FileExplorer from "./FileExplorer.jsx";
 import TerminalPanel from "./TerminalPanel.jsx";
+import HyperreasoningPanel from "./HyperreasoningPanel.jsx";
 import IntroSite, { introCss } from "./IntroSite.jsx";
 import { flowNodeCss, flowNodeTypes } from "./FlowNodes.jsx";
 import {
@@ -2135,6 +2136,17 @@ function App() {
       flex: 1;
       min-height: 0;
     }
+    .graph-panel-stack {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .graph-panel-stack .graph-canvas {
+      flex: 1;
+      min-height: 120px;
+    }
     .ide-crt .work-main {
       border-right: 2px solid #3a787899;
       background: transparent;
@@ -3766,25 +3778,36 @@ function App() {
                       onOpenFile={setActiveFile}
                     />
                   ) : (
-                    <div className="graph-canvas">
-                      {nodes.length === 0 ? (
-                        <div className="graph-empty">Run a swarm to see Altbot&apos;s hyperreasoning graph</div>
-                      ) : (
-                        <ReactFlow
-                          key={`flow-${nodes.length}`}
-                          nodes={nodes}
-                          edges={edges}
-                          nodeTypes={flowNodeTypes}
-                          onNodesChange={onNodesChange}
-                          onEdgesChange={onEdgesChange}
-                          fitView
-                          fitViewOptions={{ padding: 0.2 }}
-                          proOptions={{ hideAttribution: true }}
-                        >
-                          <Background color="#2a4a4a" gap={18} />
-                          <Controls showInteractive={false} />
-                        </ReactFlow>
-                      )}
+                    <div className="graph-panel-stack">
+                      <HyperreasoningPanel
+                        phase={searchPhase}
+                        branches={searchGraphData.branches}
+                        comparisons={searchComparisons}
+                        verdict={searchVerdict}
+                        savings={searchSavings}
+                        winnerId={searchWinner}
+                        agentCount={selected.length}
+                      />
+                      <div className="graph-canvas">
+                        {nodes.length === 0 ? (
+                          <div className="graph-empty">Run a swarm to see Altbot&apos;s hyperreasoning graph</div>
+                        ) : (
+                          <ReactFlow
+                            key={`flow-${nodes.length}`}
+                            nodes={nodes}
+                            edges={edges}
+                            nodeTypes={flowNodeTypes}
+                            onNodesChange={onNodesChange}
+                            onEdgesChange={onEdgesChange}
+                            fitView
+                            fitViewOptions={{ padding: 0.2 }}
+                            proOptions={{ hideAttribution: true }}
+                          >
+                            <Background color="#2a4a4a" gap={18} />
+                            <Controls showInteractive={false} />
+                          </ReactFlow>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

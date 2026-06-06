@@ -68,11 +68,6 @@ export default function HyperreasoningPanel({
   const isSearching = phase === "searching";
   const [expanded, setExpanded] = useState(isSearching);
 
-  useEffect(() => {
-    if (isSearching) setExpanded(true);
-    else if (phase === "executing") setExpanded(false);
-  }, [isSearching, phase]);
-
   const branchRows = useMemo(() => {
     const byId = new Map(comparisons.map((row) => [row.id, row]));
     return branches
@@ -89,6 +84,10 @@ export default function HyperreasoningPanel({
       }))
       .sort((a, b) => (a.rank || 99) - (b.rank || 99));
   }, [branches, comparisons]);
+
+  useEffect(() => {
+    if (isSearching || branchRows.length > 0) setExpanded(true);
+  }, [isSearching, branchRows.length]);
 
   const maxScore = useMemo(
     () => Math.max(1, ...branchRows.map((branch) => branch.score || 0)),
@@ -162,7 +161,7 @@ export default function HyperreasoningPanel({
         </div>
       ) : null}
 
-      {showDetails && verdict && expanded ? (
+      {showDetails && verdict ? (
         <div className="hr-verdict">
           <p className="hr-verdict-body">{verdict.body}</p>
         </div>
