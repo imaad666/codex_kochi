@@ -19,7 +19,7 @@ import {
   storeGitHubToken,
   verifyOAuthState,
 } from "./auth.js";
-import { createGitHubRepo, listUserRepos, openGitHubRepo, pushRunToGitHub } from "./github.js";
+import { createGitHubRepo, listUserRepos, loadGitHubRepoFiles, openGitHubRepo, pushRunToGitHub } from "./github.js";
 import { startRunPreview } from "./runPreview.js";
 import { createRunZipBuffer } from "./zipRun.js";
 import { runFilePath, runManifestPath } from "./runFiles.js";
@@ -671,6 +671,31 @@ app.post("/api/github/open-repo", async (req, res) => {
     console.error("[github] open-repo", error);
     res.status(error?.status === 404 ? 404 : 500).json({
       error: error instanceof GroqError ? error.message : error.message || "Could not open repo",
+    });
+  }
+});
+
+app.post("/api/github/repo-files", async (req, res) => {
+  try {
+    const user = await resolveAuthUser(req);
+    if (!user?.token) {
+      return res.status(401).json({ error: "Sign in with GitHub first" });
+    }
+    const owner = String(req.body?.owner || req.body?.repoOwner || user.login).trim();
+    const name = String(req.body?.repoName || req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ error: "Repo name is required" });
+    }
+    const result = await loadGitHubRepoFiles({
+      token: user.token,
+      owner,
+      name,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("[github] repo-files", error);
+    res.status(error?.status === 404 ? 404 : 500).json({
+      error: error instanceof GroqError ? error.message : error.message || "Could not load repo files",
     });
   }
 });

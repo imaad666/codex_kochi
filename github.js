@@ -1,5 +1,14 @@
+import { GroqError } from "./groq.js";
 import { storage } from "./storage.js";
 import { listRunFilesRecursive, runFilePath, runManifestPath } from "./runFiles.js";
+
+const SKIP_PATH =
+  /(?:^|\/)(?:node_modules|dist|build|\.git|\.next|coverage|\.open-ide|vendor|__pycache__)(?:\/|$)/;
+const SKIP_FILE = /(?:^|\/)\.env(?:\.|$)/;
+const SKIP_EXT =
+  /\.(png|jpe?g|gif|webp|ico|svg|woff2?|ttf|eot|mp4|zip|pdf|exe|dll|so|dylib|lock)$/i;
+const MAX_REPO_FILES = 80;
+const MAX_FILE_BYTES = 150_000;
 
 async function githubFetch(path, { token, method = "GET", body } = {}) {
   const res = await fetch(`https://api.github.com${path}`, {
@@ -66,6 +75,62 @@ export async function openGitHubRepo({ token, login, repoRef }) {
     url: repo.html_url || `https://github.com/${owner}/${name}`,
     owner: repo.owner?.login || owner,
     source: "existing",
+    defaultBranch: repo.default_branch || "main",
+  };
+}
+
+function encodeRepoPath(path) {
+  return String(path)
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+/** Fetch readable text files from a GitHub repo into IDE fileSystem shape. */
+export async function loadGitHubRepoFiles({
+  token,
+  owner,
+  name,
+  maxFiles = MAX_REPO_FILES,
+} = {}) {
+  const repo = await githubFetch(`/repos/${owner}/${name}`, { token });
+  const branch = repo.default_branch || "main";
+  const tree = await githubFetch(
+    `/repos/${owner}/${name}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    { token }
+  );
+
+  const candidates = (tree.tree || [])
+    .filter((item) => item.type === "blob" && item.path)
+    .filter((item) => !SKIP_PATH.test(item.path) && !SKIP_FILE.test(item.path))
+    .filter((item) => !SKIP_EXT.test(item.path))
+    .filter((item) => (item.size ?? 0) <= MAX_FILE_BYTES)
+    .slice(0, maxFiles);
+
+  const files = [];
+  for (const item of candidates) {
+    try {
+      const meta = await githubFetch(
+        `/repos/${owner}/${name}/contents/${encodeRepoPath(item.path)}?ref=${encodeURIComponent(branch)}`,
+        { token }
+      );
+      if (Array.isArray(meta) || meta.type !== "file" || !meta.content) continue;
+      const raw = Buffer.from(String(meta.content).replace(/\n/g, ""), "base64");
+      if (raw.length > MAX_FILE_BYTES) continue;
+      const content = raw.toString("utf8");
+      if (content.includes("\0")) continue;
+      files.push({ path: item.path, content, size: raw.length });
+    } catch {
+      // skip unreadable paths
+    }
+  }
+
+  return {
+    owner,
+    name,
+    branch,
+    fullName: repo.full_name || `${owner}/${name}`,
+    files,
   };
 }
 

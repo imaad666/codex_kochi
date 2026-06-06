@@ -749,6 +749,41 @@ function App() {
     loadExistingRepos();
   }, [stage, repoMode, authUser, githubRepo, loadExistingRepos]);
 
+  const loadRepoIntoWorkspace = useCallback(
+    async (repo) => {
+      if (!repo?.owner || !repo?.name) return 0;
+      appendChat("system", `Loading files from ${repo.fullName}…`);
+      const res = await fetch("/api/github/repo-files", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner: repo.owner, repoName: repo.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load repo files");
+      const next = {};
+      for (const file of data.files || []) {
+        next[file.path] = {
+          code: file.content,
+          agent: "GitHub",
+          filename: file.path,
+          status: "complete",
+          summary: `From ${repo.fullName}`,
+        };
+      }
+      const count = Object.keys(next).length;
+      if (count) {
+        setFileSystem(next);
+        setActiveFile(data.files[0]?.path || null);
+        appendChat("system", `Loaded ${count} file(s) from GitHub (${data.branch || "main"}).`);
+      } else {
+        appendChat("system", "Repo linked — no readable text files found (or repo is empty).");
+      }
+      return count;
+    },
+    [appendChat]
+  );
+
   const openExistingRepo = useCallback(
     async (repoRef) => {
       const ref = String(repoRef || manualRepoRef || repoSearch || "").trim();
@@ -765,13 +800,16 @@ function App() {
         if (!res.ok) throw new Error(data.error || "Could not open repo");
         setGithubRepo(data);
         appendChat("system", `Opened repo: ${data.url}`);
+        if (data.source === "existing") {
+          await loadRepoIntoWorkspace(data);
+        }
       } catch (error) {
         appendChat("system", error.message || "Could not open repo");
       } finally {
         setRepoBusy(false);
       }
     },
-    [manualRepoRef, repoSearch, repoBusy, appendChat]
+    [manualRepoRef, repoSearch, repoBusy, appendChat, loadRepoIntoWorkspace]
   );
 
   const handleRepoSearchKey = useCallback(
@@ -899,7 +937,12 @@ function App() {
       }
       if (session.planSummary) setPlanSummary(session.planSummary);
       if (session.planSteps?.length) setPlanSteps(session.planSteps);
-      if (session.githubRepo) setGithubRepo(session.githubRepo);
+      if (session.githubRepo) {
+        setGithubRepo(session.githubRepo);
+        if (fileCount === 0 && session.githubRepo.source === "existing") {
+          loadRepoIntoWorkspace(session.githubRepo).catch(() => {});
+        }
+      }
       if (session.localOnly) setLocalOnly(true);
       const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
       const hasProgress =
@@ -967,7 +1010,13 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [hydrateExecutionGraph]);
+  }, [hydrateExecutionGraph, loadRepoIntoWorkspace]);
+
+  useEffect(() => {
+    if (stage !== "ide" || !githubRepo || githubRepo.source !== "existing") return;
+    if (Object.keys(fileSystem).length > 0) return;
+    loadRepoIntoWorkspace(githubRepo).catch(() => {});
+  }, [stage, githubRepo, fileSystem, loadRepoIntoWorkspace]);
 
   useEffect(() => {
     if (!sessionReady) return undefined;
