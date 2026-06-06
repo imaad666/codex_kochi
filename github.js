@@ -7,8 +7,62 @@ const SKIP_PATH =
 const SKIP_FILE = /(?:^|\/)\.env(?:\.|$)/;
 const SKIP_EXT =
   /\.(png|jpe?g|gif|webp|ico|svg|woff2?|ttf|eot|mp4|zip|pdf|exe|dll|so|dylib|lock)$/i;
-const MAX_REPO_FILES = 80;
+const MAX_REPO_FILES = 120;
 const MAX_FILE_BYTES = 150_000;
+const FETCH_CONCURRENCY = 12;
+
+function filePriority(path) {
+  const name = String(path || "");
+  if (name === "package.json" || name === "README.md") return 0;
+  if (/^(server|index|main)\.(js|ts|mjs|cjs)$/i.test(name.split("/").pop() || "")) return 1;
+  if (/^src\//i.test(name) || /^app\//i.test(name)) return 2;
+  if (/\.(jsx?|tsx?|vue|svelte|py|go|rs|sql|css|html|json|md|yaml|yml|toml|env\.example)$/i.test(name)) return 3;
+  return 4;
+}
+
+async function resolveBranchTreeSha(token, owner, name, branch) {
+  try {
+    const branchMeta = await githubFetch(
+      `/repos/${owner}/${name}/branches/${encodeURIComponent(branch)}`,
+      { token }
+    );
+    return branchMeta?.commit?.commit?.tree?.sha || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchRepoFile(token, owner, name, branch, path) {
+  const meta = await githubFetch(
+    `/repos/${owner}/${name}/contents/${encodeRepoPath(path)}?ref=${encodeURIComponent(branch)}`,
+    { token }
+  );
+  if (Array.isArray(meta) || meta.type !== "file" || !meta.content) return null;
+  const raw = Buffer.from(String(meta.content).replace(/\n/g, ""), "base64");
+  if (raw.length > MAX_FILE_BYTES) return null;
+  const content = raw.toString("utf8");
+  if (content.includes("\0")) return null;
+  return { path, content, size: raw.length };
+}
+
+async function mapPool(items, limit, worker) {
+  const results = [];
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const current = index;
+      index += 1;
+      try {
+        const value = await worker(items[current], current);
+        if (value) results.push(value);
+      } catch {
+        // skip unreadable paths
+      }
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
 
 async function githubFetch(path, { token, method = "GET", body } = {}) {
   const res = await fetch(`https://api.github.com${path}`, {
@@ -95,8 +149,9 @@ export async function loadGitHubRepoFiles({
 } = {}) {
   const repo = await githubFetch(`/repos/${owner}/${name}`, { token });
   const branch = repo.default_branch || "main";
+  const treeSha = (await resolveBranchTreeSha(token, owner, name, branch)) || branch;
   const tree = await githubFetch(
-    `/repos/${owner}/${name}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    `/repos/${owner}/${name}/git/trees/${treeSha}?recursive=1`,
     { token }
   );
 
@@ -105,25 +160,16 @@ export async function loadGitHubRepoFiles({
     .filter((item) => !SKIP_PATH.test(item.path) && !SKIP_FILE.test(item.path))
     .filter((item) => !SKIP_EXT.test(item.path))
     .filter((item) => (item.size ?? 0) <= MAX_FILE_BYTES)
+    .sort((a, b) => {
+      const rank = filePriority(a.path) - filePriority(b.path);
+      if (rank !== 0) return rank;
+      return String(a.path).localeCompare(String(b.path));
+    })
     .slice(0, maxFiles);
 
-  const files = [];
-  for (const item of candidates) {
-    try {
-      const meta = await githubFetch(
-        `/repos/${owner}/${name}/contents/${encodeRepoPath(item.path)}?ref=${encodeURIComponent(branch)}`,
-        { token }
-      );
-      if (Array.isArray(meta) || meta.type !== "file" || !meta.content) continue;
-      const raw = Buffer.from(String(meta.content).replace(/\n/g, ""), "base64");
-      if (raw.length > MAX_FILE_BYTES) continue;
-      const content = raw.toString("utf8");
-      if (content.includes("\0")) continue;
-      files.push({ path: item.path, content, size: raw.length });
-    } catch {
-      // skip unreadable paths
-    }
-  }
+  const files = await mapPool(candidates, FETCH_CONCURRENCY, (item) =>
+    fetchRepoFile(token, owner, name, branch, item.path)
+  );
 
   return {
     owner,
@@ -131,6 +177,7 @@ export async function loadGitHubRepoFiles({
     branch,
     fullName: repo.full_name || `${owner}/${name}`,
     files,
+    truncated: Boolean(tree.truncated),
   };
 }
 

@@ -547,6 +547,7 @@ function App() {
   const lastInspoQueryRef = useRef("");
   const chatEndRef = useRef(null);
   const repoAutoLoadRef = useRef(new Set());
+  const repoLoadInFlightRef = useRef(null);
 
   const appendChat = useCallback((role, text, meta = {}) => {
     setChatMessages((current) => [
@@ -1018,14 +1019,39 @@ function App() {
       if (count) {
         setFileSystem(next);
         setActiveFile(data.files[0]?.path || null);
-        if (repo.fullName) repoAutoLoadRef.current.add(repo.fullName);
-        appendChat("system", `Loaded ${count} file(s) from GitHub (${data.branch || "main"}).`);
+        const truncatedNote = data.truncated ? " (large repo — first 120 text files)" : "";
+        appendChat("system", `Loaded ${count} file(s) from GitHub (${data.branch || "main"})${truncatedNote}.`);
       } else {
-        appendChat("system", "Repo linked — no readable text files found (or repo is empty).");
+        appendChat(
+          "system",
+          `Repo linked but no readable text files were found on ${data.branch || "main"}. Is the repo empty?`
+        );
       }
+      if (repo.fullName) repoAutoLoadRef.current.add(repo.fullName);
       return count;
     },
     [appendChat]
+  );
+
+  const ensureRepoInWorkspace = useCallback(
+    async (repo = githubRepo) => {
+      if (!repo?.owner || !repo?.name) return 0;
+      const source = repo.source || "existing";
+      if (source === "created") return 0;
+      if (Object.keys(fileSystem).length > 0) return Object.keys(fileSystem).length;
+      const key = repo.fullName || `${repo.owner}/${repo.name}`;
+      if (repoAutoLoadRef.current.has(key) || repoLoadInFlightRef.current === key) return 0;
+      repoLoadInFlightRef.current = key;
+      try {
+        return await loadRepoIntoWorkspace(repo);
+      } catch (error) {
+        appendChat("system", error.message || "Could not import repo into workspace");
+        return 0;
+      } finally {
+        if (repoLoadInFlightRef.current === key) repoLoadInFlightRef.current = null;
+      }
+    },
+    [githubRepo, fileSystem, loadRepoIntoWorkspace, appendChat]
   );
 
   const openExistingRepo = useCallback(
@@ -1044,7 +1070,8 @@ function App() {
         if (!res.ok) throw new Error(data.error || "Could not open repo");
         setGithubRepo(data);
         appendChat("system", `Opened repo: ${data.url}`);
-        if (data.source === "existing") {
+        if ((data.source || "existing") === "existing") {
+          if (data.fullName) repoAutoLoadRef.current.delete(data.fullName);
           await loadRepoIntoWorkspace(data);
         }
       } catch (error) {
@@ -1184,12 +1211,11 @@ function App() {
       const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
       if (session.githubRepo) {
         setGithubRepo(session.githubRepo);
-        if (fileCount === 0 && session.githubRepo.source === "existing") {
-          const key = session.githubRepo.fullName;
-          if (key && !repoAutoLoadRef.current.has(key)) {
-            repoAutoLoadRef.current.add(key);
-            loadRepoIntoWorkspace(session.githubRepo).catch(() => {});
-          }
+        const repoSource = session.githubRepo.source || "existing";
+        if (fileCount === 0 && repoSource !== "created") {
+          loadRepoIntoWorkspace(session.githubRepo).catch((error) => {
+            appendChat("system", error.message || "Could not import saved repo into workspace");
+          });
         }
       }
       if (session.localOnly) setLocalOnly(true);
@@ -1267,13 +1293,12 @@ function App() {
   }, [sessionReady, paintMegaGraph]);
 
   useEffect(() => {
-    if (stage !== "ide" || !githubRepo || githubRepo.source !== "existing") return;
+    if (stage !== "ide" || !githubRepo) return;
+    const source = githubRepo.source || "existing";
+    if (source === "created") return;
     if (Object.keys(fileSystem).length > 0) return;
-    const key = githubRepo.fullName;
-    if (!key || repoAutoLoadRef.current.has(key)) return;
-    repoAutoLoadRef.current.add(key);
-    loadRepoIntoWorkspace(githubRepo).catch(() => {});
-  }, [stage, githubRepo, fileSystem, loadRepoIntoWorkspace]);
+    ensureRepoInWorkspace(githubRepo);
+  }, [stage, githubRepo, fileSystem, ensureRepoInWorkspace]);
 
   useEffect(() => {
     if (!sessionReady) return undefined;
@@ -1890,10 +1915,11 @@ function App() {
     runSwarmFromPrompt,
   ]);
 
-  const openIdeDirectly = useCallback(() => {
+  const openIdeDirectly = useCallback(async () => {
+    if (githubRepo) await ensureRepoInWorkspace(githubRepo);
     setStage("ide");
     appendChat("system", "IDE ready — use Code mode in chat to build or change files with hyperreasoning.");
-  }, [appendChat]);
+  }, [appendChat, githubRepo, ensureRepoInWorkspace]);
 
   const init = useCallback(async () => {
     appendChat("user", `Initialize swarm: ${prompt}`);
@@ -3911,13 +3937,23 @@ function App() {
                     </span>
                   </div>
                   <div className="repo-cta-row">
-                    <button className="repo-action ghost" type="button" onClick={() => setGithubRepo(null)}>
+                    <button className="repo-action ghost" type="button" onClick={() => {
+                      if (githubRepo?.fullName) repoAutoLoadRef.current.delete(githubRepo.fullName);
+                      setGithubRepo(null);
+                    }}>
                       change repo
                     </button>
                     <button className="repo-action ghost" type="button" onClick={openIdeDirectly}>
                       open IDE
                     </button>
-                    <button className="repo-action" type="button" onClick={() => setStage("prompt")}>
+                    <button
+                      className="repo-action"
+                      type="button"
+                      onClick={async () => {
+                        if (githubRepo) await ensureRepoInWorkspace(githubRepo);
+                        setStage("prompt");
+                      }}
+                    >
                       continue →
                     </button>
                   </div>
