@@ -156,6 +156,36 @@ export const introCss = `
   .intro-resume-btn:hover { box-shadow: 0 0 14px ${CRT.text}44; }
 
   .intro-hero { text-align: center; }
+  .intro-hero-logo {
+    width: min(168px, 38vw);
+    height: auto;
+    margin: 0 auto 1.25rem;
+    display: block;
+    border-radius: 6px;
+    box-shadow: 0 8px 32px #00000055;
+  }
+  .intro-hackathon {
+    margin: 0 auto 1.5rem;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  .intro-hackathon-title {
+    margin: 0;
+    color: #ececec;
+    font-size: clamp(17px, 2.4vw, 22px);
+    font-weight: 500;
+    line-height: 1.35;
+    text-transform: none;
+    text-shadow: none;
+  }
+  .intro-hackathon-by {
+    margin: 0.35rem 0 0;
+    color: #9b9b9b;
+    font-size: clamp(13px, 1.7vw, 15px);
+    font-weight: 400;
+    line-height: 1.3;
+    text-transform: none;
+  }
   .intro-kicker {
     display: inline-block;
     margin-bottom: 1rem;
@@ -586,6 +616,11 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
       >
         <section className="intro-slide" id="hero" ref={setSlideRef(0)}>
           <div className="intro-slide-inner intro-hero">
+            <img className="intro-hero-logo" src="/crt.jpg" alt="Open IDE on CRT" width={168} height={168} />
+            <div className="intro-hackathon">
+              <p className="intro-hackathon-title">Built at the Codex Community Hackathon</p>
+              <p className="intro-hackathon-by">by Imaad</p>
+            </div>
             <h1>Open IDE</h1>
             <p className="intro-tagline">The CRT-native coding swarm that plans before it spends.</p>
             <p className="intro-lead">
