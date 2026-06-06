@@ -3795,7 +3795,6 @@ function App() {
   const files = Object.keys(fileSystem);
   const activeFileEntry = activeFile ? fileSystem[activeFile] : null;
   const hasOutput = Boolean(status.runId && files.length > 0 && !runningAgents.length);
-  const hasBackend = files.some((name) => name === "server.js" || name.endsWith("server.js"));
 
   return (
     <>
@@ -3820,15 +3819,6 @@ function App() {
                 <>
                   <button type="button" className="output-btn" disabled={!!outputBusy} onClick={downloadZip}>
                     Export
-                  </button>
-                  <button
-                    type="button"
-                    className="output-btn"
-                    disabled={!!outputBusy || !hasBackend}
-                    onClick={runPreview}
-                    title={hasBackend ? "Run server.js locally" : "Needs server.js"}
-                  >
-                    {outputBusy === "run" ? "Starting…" : "Preview"}
                   </button>
                   <button
                     type="button"
