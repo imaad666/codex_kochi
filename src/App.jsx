@@ -1340,6 +1340,88 @@ function App() {
     }
   }, [githubRepo, outputBusy, authUser, clearWorkspace, appendChat]);
 
+  const runSwarmFromPrompt = useCallback(
+    async ({ promptText, resetWorkspace = false } = {}) => {
+      const raw = String(promptText || "").trim();
+      if (!raw) return false;
+      if (searchPhase === "searching" || runningAgents.length > 0) {
+        appendChat("system", "Swarm is already running — wait for it to finish.");
+        return false;
+      }
+      if (!selected.length) {
+        appendChat("system", "Select at least one agent (cards step) before running a swarm.");
+        return false;
+      }
+
+      setStage("ide");
+      if (resetWorkspace) {
+        setFileSystem({});
+        setActiveFile(null);
+      }
+      setRunningAgents([]);
+      setSearchPhase("searching");
+      setBottomPanelTab("graph");
+      setSearchLog([]);
+      setSearchWinner(null);
+      setSearchVerdict(null);
+      setSearchComparisons([]);
+      setSearchSavings(null);
+      setPlanSummary("");
+      searchNodesRef.current = [];
+      searchEdgesRef.current = [];
+      bestPathRef.current = [];
+      executionGraphRef.current = { nodes: [], edges: [] };
+      setNodes([]);
+      setEdges([]);
+      setStatus((current) => ({ ...current, error: "" }));
+
+      const fileNames = Object.keys(fileSystem);
+      const swarmPrompt =
+        !resetWorkspace && fileNames.length
+          ? `Existing project files: ${fileNames.join(", ")}\n\nChange request: ${raw}`
+          : raw;
+
+      if (resetWorkspace) setPrompt(raw);
+
+      const inspoSelection = inspoCandidates.filter((img) => inspoSelectedIds.includes(img.id));
+      if (inspoSelection.length) {
+        appendChat("system", `Using ${inspoSelection.length} inspiration image(s) as visual context.`);
+      }
+
+      try {
+        await streamSwarmGenerate(
+          {
+            prompt: swarmPrompt,
+            agents: selected,
+            attachments,
+            inspoSelection,
+            sessionId,
+          },
+          swarmHandlers()
+        );
+        return true;
+      } catch (error) {
+        setRunningAgents([]);
+        setSearchPhase("idle");
+        setStatus((current) => ({ ...current, error: error.message }));
+        appendChat("system", error.message || "Swarm failed");
+        return false;
+      }
+    },
+    [
+      searchPhase,
+      runningAgents.length,
+      selected,
+      fileSystem,
+      inspoCandidates,
+      inspoSelectedIds,
+      attachments,
+      sessionId,
+      appendChat,
+      swarmHandlers,
+    ]
+  );
+
   const sendChat = useCallback(async () => {
     const text = chatInput.trim();
     if (!text) return;
@@ -1499,88 +1581,6 @@ function App() {
     chatMode,
     runSwarmFromPrompt,
   ]);
-
-  const runSwarmFromPrompt = useCallback(
-    async ({ promptText, resetWorkspace = false } = {}) => {
-      const raw = String(promptText || "").trim();
-      if (!raw) return false;
-      if (searchPhase === "searching" || runningAgents.length > 0) {
-        appendChat("system", "Swarm is already running — wait for it to finish.");
-        return false;
-      }
-      if (!selected.length) {
-        appendChat("system", "Select at least one agent (cards step) before running a swarm.");
-        return false;
-      }
-
-      setStage("ide");
-      if (resetWorkspace) {
-        setFileSystem({});
-        setActiveFile(null);
-      }
-      setRunningAgents([]);
-      setSearchPhase("searching");
-      setBottomPanelTab("graph");
-      setSearchLog([]);
-      setSearchWinner(null);
-      setSearchVerdict(null);
-      setSearchComparisons([]);
-      setSearchSavings(null);
-      setPlanSummary("");
-      searchNodesRef.current = [];
-      searchEdgesRef.current = [];
-      bestPathRef.current = [];
-      executionGraphRef.current = { nodes: [], edges: [] };
-      setNodes([]);
-      setEdges([]);
-      setStatus((current) => ({ ...current, error: "" }));
-
-      const fileNames = Object.keys(fileSystem);
-      const swarmPrompt =
-        !resetWorkspace && fileNames.length
-          ? `Existing project files: ${fileNames.join(", ")}\n\nChange request: ${raw}`
-          : raw;
-
-      if (resetWorkspace) setPrompt(raw);
-
-      const inspoSelection = inspoCandidates.filter((img) => inspoSelectedIds.includes(img.id));
-      if (inspoSelection.length) {
-        appendChat("system", `Using ${inspoSelection.length} inspiration image(s) as visual context.`);
-      }
-
-      try {
-        await streamSwarmGenerate(
-          {
-            prompt: swarmPrompt,
-            agents: selected,
-            attachments,
-            inspoSelection,
-            sessionId,
-          },
-          swarmHandlers()
-        );
-        return true;
-      } catch (error) {
-        setRunningAgents([]);
-        setSearchPhase("idle");
-        setStatus((current) => ({ ...current, error: error.message }));
-        appendChat("system", error.message || "Swarm failed");
-        return false;
-      }
-    },
-    [
-      searchPhase,
-      runningAgents.length,
-      selected,
-      fileSystem,
-      inspoCandidates,
-      inspoSelectedIds,
-      attachments,
-      sessionId,
-      appendChat,
-      swarmHandlers,
-    ]
-  );
 
   const openIdeDirectly = useCallback(() => {
     setStage("ide");
