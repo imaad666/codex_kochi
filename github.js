@@ -1,9 +1,10 @@
 import { GroqError } from "./groq.js";
+import { parseRepoIdentity as resolveRepoIdentity } from "./repoUtils.js";
 import { storage } from "./storage.js";
 import { listRunFilesRecursive, runFilePath, runManifestPath } from "./runFiles.js";
 
 const SKIP_PATH =
-  /(?:^|\/)(?:node_modules|dist|build|\.git|\.next|coverage|\.open-ide|vendor|__pycache__)(?:\/|$)/;
+  /(?:^|\/)(?:node_modules|dist|build|\.git|\.next|coverage|\.open-ide|vendor|__pycache__|public(?:\/assets)?)(?:\/|$)/;
 const SKIP_FILE = /(?:^|\/)\.env(?:\.|$)/;
 const SKIP_EXT =
   /\.(png|jpe?g|gif|webp|ico|svg|woff2?|ttf|eot|mp4|zip|pdf|exe|dll|so|dylib|lock)$/i;
@@ -37,9 +38,23 @@ async function fetchRepoFile(token, owner, name, branch, path) {
     `/repos/${owner}/${name}/contents/${encodeRepoPath(path)}?ref=${encodeURIComponent(branch)}`,
     { token }
   );
-  if (Array.isArray(meta) || meta.type !== "file" || !meta.content) return null;
-  const raw = Buffer.from(String(meta.content).replace(/\n/g, ""), "base64");
-  if (raw.length > MAX_FILE_BYTES) return null;
+  if (Array.isArray(meta) || meta.type !== "file") return null;
+
+  let raw = null;
+  if (meta.content) {
+    raw = Buffer.from(String(meta.content).replace(/\n/g, ""), "base64");
+  } else if (meta.download_url) {
+    const res = await fetch(meta.download_url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.raw",
+        "User-Agent": "OpenIDE",
+      },
+    });
+    if (!res.ok) return null;
+    raw = Buffer.from(await res.arrayBuffer());
+  }
+  if (!raw || raw.length > MAX_FILE_BYTES) return null;
   const content = raw.toString("utf8");
   if (content.includes("\0")) return null;
   return { path, content, size: raw.length };
@@ -89,6 +104,18 @@ export function slugifyRepoName(text) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40) || "open-ide-project";
+}
+
+export function parseRepoIdentity(input, fallbackLogin = "") {
+  const resolved = resolveRepoIdentity(input, fallbackLogin);
+  if (!resolved.name) {
+    throw new GroqError("Repo name is required");
+  }
+  return {
+    ...resolved,
+    url: resolved.url || `https://github.com/${resolved.owner}/${resolved.name}`,
+    defaultBranch: resolved.defaultBranch || resolved.default_branch || "main",
+  };
 }
 
 export async function listUserRepos(token, { perPage = 40, page = 1 } = {}) {
@@ -145,15 +172,26 @@ export async function loadGitHubRepoFiles({
   token,
   owner,
   name,
+  fullName,
   maxFiles = MAX_REPO_FILES,
+  login,
 } = {}) {
+  const repoRef = parseRepoIdentity({ owner, name, fullName }, login);
+  owner = repoRef.owner;
+  name = repoRef.name;
+
   const repo = await githubFetch(`/repos/${owner}/${name}`, { token });
   const branch = repo.default_branch || "main";
   const treeSha = (await resolveBranchTreeSha(token, owner, name, branch)) || branch;
-  const tree = await githubFetch(
-    `/repos/${owner}/${name}/git/trees/${treeSha}?recursive=1`,
-    { token }
-  );
+  let tree;
+  try {
+    tree = await githubFetch(`/repos/${owner}/${name}/git/trees/${treeSha}?recursive=1`, { token });
+  } catch (error) {
+    if (error.status === 404) {
+      throw new GroqError(`Branch "${branch}" has no files yet — push code to GitHub first`, 404);
+    }
+    throw error;
+  }
 
   const candidates = (tree.tree || [])
     .filter((item) => item.type === "blob" && item.path)
@@ -175,9 +213,14 @@ export async function loadGitHubRepoFiles({
     owner,
     name,
     branch,
-    fullName: repo.full_name || `${owner}/${name}`,
+    fullName: repo.full_name || repoRef.fullName,
     files,
     truncated: Boolean(tree.truncated),
+    stats: {
+      treeEntries: (tree.tree || []).length,
+      candidates: candidates.length,
+      loaded: files.length,
+    },
   };
 }
 

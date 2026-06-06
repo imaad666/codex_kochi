@@ -20,6 +20,8 @@ import TerminalPanel from "./TerminalPanel.jsx";
 import HyperreasoningPanel from "./HyperreasoningPanel.jsx";
 import IntroSite, { introCss } from "./IntroSite.jsx";
 import { flowNodeCss, flowNodeTypes } from "./FlowNodes.jsx";
+import GraphAutoFit from "./GraphAutoFit.jsx";
+import { parseRepoIdentity } from "../repoUtils.js";
 import {
   CLEAR_GITHUB_REPO_REPLY,
   CLEAR_WORKSPACE_REPLY,
@@ -161,6 +163,47 @@ const SEARCH_STATUS_MAP = {
   FAILED_TEST: "error",
 };
 
+function truncateGraphText(text, max = 88) {
+  const value = String(text || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function estimatePlanNodeSize(data) {
+  const width = data.isRoot ? 212 : 196;
+  let height = data.isRoot ? 96 : 84;
+  if (data.prompt) height += 38;
+  if (data.branchPrompt) height += 34;
+  if (data.shortSummary) height += 16;
+  if (data.score != null) height += 24;
+  if (data.stepCount != null) height += 16;
+  return { width, height: Math.min(height, data.isRoot ? 168 : 152) };
+}
+
+function estimateExecNodeSize(data) {
+  const width = data.isSubagent ? 168 : 184;
+  let height = 78;
+  if (data.branchPrompt || data.description) height += 32;
+  return { width, height };
+}
+
+function graphEdge(active, { bridge = false, dim = false } = {}) {
+  const stroke = bridge ? "#9cb86a" : dim ? "#4a6060" : active ? CRT.textSoft : "#5a8888";
+  return {
+    type: "smoothstep",
+    animated: active && !dim,
+    style: {
+      stroke,
+      strokeWidth: active ? 2.5 : 2,
+      opacity: dim ? 0.45 : 1,
+      ...(bridge ? { strokeDasharray: "7 5" } : {}),
+    },
+    markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 18, height: 18 },
+  };
+}
+
 function layoutSearchGraph(rawNodes, rawEdges, bestPath = [], rankdir = "LR") {
   if (!rawNodes.length) return { nodes: [], edges: [] };
   const best = new Set(bestPath);
@@ -171,68 +214,61 @@ function layoutSearchGraph(rawNodes, rawEdges, bestPath = [], rankdir = "LR") {
   const nodes = rawNodes.map((n) => {
     const status = SEARCH_STATUS_MAP[n.status] || "planned";
     const onPath = best.has(n.id);
+    const isRoot = n.depth === 0;
+    const data = {
+      label: n.title,
+      prompt: isRoot ? truncateGraphText(n.prompt, 96) : "",
+      branchPrompt: !isRoot ? truncateGraphText(n.branchPrompt, 80) : "",
+      status,
+      score: n.score,
+      rank: n.rank,
+      shortSummary: n.shortSummary || "",
+      stepCount: n.stepCount,
+      agentsUsed: n.agentsUsed,
+      maxScore,
+      isRoot,
+      onPath,
+    };
     return {
       id: n.id,
       type: "planBranch",
-      data: {
-        label: n.title,
-        prompt: n.prompt || "",
-        branchPrompt: n.branchPrompt || "",
-        status,
-        score: n.score,
-        rank: n.rank,
-        shortSummary: n.shortSummary || "",
-        rationale: n.rationaleSummary || n.rationale || "",
-        pruneReason: n.pruneReason || "",
-        stepCount: n.stepCount,
-        agentsUsed: n.agentsUsed,
-        maxScore,
-        isRoot: n.depth === 0,
-      },
+      data,
       position: { x: 0, y: 0 },
-      className: n.status === "PRUNED" ? "status-pruned" : "",
-      style: {
-        opacity: n.status === "PRUNED" ? 0.55 : 1,
-        boxShadow: onPath ? `0 0 16px ${CRT.text}88` : "none",
-        background: "transparent",
-        border: "none",
-        padding: 0,
-      },
+      style: { background: "transparent", border: "none", padding: 0 },
     };
   });
-  const edges = rawEdges.map((e) => ({
-    id: `e${e.parentId}-${e.childId}`,
-    source: e.parentId,
-    target: e.childId,
-    animated: best.has(e.childId),
-    style: { stroke: best.has(e.childId) ? CRT.textSoft : CRT.textDim },
-    markerEnd: { type: MarkerType.ArrowClosed, color: CRT.text },
-  }));
+  const edges = rawEdges.map((e) => {
+    const active = best.has(e.childId);
+    const dim = rawNodes.find((node) => node.id === e.childId)?.status === "PRUNED";
+    return {
+      id: `e${e.parentId}-${e.childId}`,
+      source: e.parentId,
+      target: e.childId,
+      ...graphEdge(active, { dim }),
+    };
+  });
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir,
-    nodesep: rankdir === "LR" ? 36 : 50,
-    ranksep: rankdir === "LR" ? 90 : 70,
+    nodesep: rankdir === "LR" ? 56 : 64,
+    ranksep: rankdir === "LR" ? 120 : 90,
+    marginx: 24,
+    marginy: 24,
   });
-  nodes.forEach((n) =>
-    g.setNode(n.id, {
-      width: n.data.isRoot ? 220 : 260,
-      height: n.data.isRoot
-        ? Math.min(150, 78 + Math.ceil(String(n.data.prompt || "").length / 36) * 11)
-        : Math.min(190, 118 + Math.ceil(String(n.data.branchPrompt || "").length / 34) * 10),
-    })
-  );
+  nodes.forEach((n) => {
+    const size = estimatePlanNodeSize(n.data);
+    g.setNode(n.id, size);
+  });
   edges.forEach((e) => g.setEdge(e.source, e.target));
   dagre.layout(g);
 
   return {
     nodes: nodes.map((n) => {
       const { x, y } = g.node(n.id);
-      const yOffset = n.data.isRoot ? 36 : 56;
-      const xOffset = n.data.isRoot ? 108 : 128;
-      return { ...n, position: { x: x - xOffset, y: y - yOffset } };
+      const size = estimatePlanNodeSize(n.data);
+      return { ...n, position: { x: x - size.width / 2, y: y - size.height / 2 } };
     }),
     edges,
   };
@@ -247,7 +283,7 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
       label: s.title,
       agent: s.agent,
       description: s.description,
-      branchPrompt: String(s.description || "").trim(),
+      branchPrompt: truncateGraphText(s.description || "", 72),
       status: stepStatus[s.id] || agentStatus[s.agent] || "planned",
       isSubagent: Boolean(stepStatus[s.id]),
     },
@@ -261,9 +297,7 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
         id: `e${depId}-${step.id}`,
         source: depId,
         target: step.id,
-        animated: true,
-        style: { stroke: CRT.text },
-        markerEnd: { type: MarkerType.ArrowClosed, color: CRT.text },
+        ...graphEdge(true),
       });
     }
   }
@@ -273,9 +307,7 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
         id: `e${s.id}-${steps[i + 1].id}`,
         source: s.id,
         target: steps[i + 1].id,
-        animated: true,
-        style: { stroke: CRT.text },
-        markerEnd: { type: MarkerType.ArrowClosed, color: CRT.text },
+        ...graphEdge(true),
       });
     });
   }
@@ -284,17 +316,20 @@ function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "L
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir,
-    nodesep: rankdir === "LR" ? 32 : 40,
-    ranksep: rankdir === "LR" ? 88 : 60,
+    nodesep: rankdir === "LR" ? 48 : 56,
+    ranksep: rankdir === "LR" ? 100 : 72,
+    marginx: 20,
+    marginy: 20,
   });
-  nodes.forEach((n) => g.setNode(n.id, { width: 170, height: 52 }));
+  nodes.forEach((n) => g.setNode(n.id, estimateExecNodeSize(n.data)));
   edges.forEach((e) => g.setEdge(e.source, e.target));
   dagre.layout(g);
 
   return {
     nodes: nodes.map((n) => {
       const { x, y } = g.node(n.id);
-      return { ...n, position: { x: x - 80, y: y - 25 } };
+      const size = estimateExecNodeSize(n.data);
+      return { ...n, position: { x: x - size.width / 2, y: y - size.height / 2 } };
     }),
     edges,
   };
@@ -328,19 +363,20 @@ function layoutSubagentNodes(subagents, execNodes) {
     list.forEach((sa, index) => {
       const status =
         sa.status === "complete" ? "complete" : sa.status === "running" ? "running" : "ready";
+      const spread = (index - (list.length - 1) / 2) * 112;
       nodes.push({
         id: sa.id,
         type: "execStep",
         data: {
           label: sa.title,
           agent: sa.displayName || sa.parentAgent,
-          branchPrompt: sa.model ? `Groq · ${String(sa.model).split("/").pop()}` : "",
+          branchPrompt: sa.model ? truncateGraphText(String(sa.model).split("/").pop(), 40) : "",
           status,
           isSubagent: true,
         },
         position: {
-          x: parent.position.x + index * 24,
-          y: parent.position.y + 78 + index * 12,
+          x: parent.position.x + spread,
+          y: parent.position.y + 108,
         },
         style: { background: "transparent", border: "none", padding: 0 },
       });
@@ -348,9 +384,7 @@ function layoutSubagentNodes(subagents, execNodes) {
         id: `sub-${sa.id}`,
         source: parent.id,
         target: sa.id,
-        animated: sa.status === "running",
-        style: { stroke: CRT.textDim, strokeWidth: 1.5 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: CRT.textDim },
+        ...graphEdge(sa.status === "running"),
       });
     });
   }
@@ -378,26 +412,28 @@ function layoutMegaGraph({
     };
   }
 
-  const execLaidRaw = layoutGraph(planSteps, agentStatus, stepStatus, "TB");
+  const execLaidRaw = layoutGraph(planSteps, agentStatus, stepStatus, "LR");
   const execLaid = prefixExecGraph(execLaidRaw);
 
   let maxX = 0;
   let minY = 0;
   let maxY = 0;
   for (const node of searchLaid.nodes) {
-    maxX = Math.max(maxX, node.position.x + 280);
+    const size = estimatePlanNodeSize(node.data);
+    maxX = Math.max(maxX, node.position.x + size.width);
     minY = Math.min(minY, node.position.y);
-    maxY = Math.max(maxY, node.position.y + 120);
+    maxY = Math.max(maxY, node.position.y + size.height);
   }
 
-  const offsetX = maxX + 100;
+  const offsetX = maxX + 180;
   const centerY = searchLaid.nodes.length ? (minY + maxY) / 2 : 0;
 
   let execMinY = Infinity;
   let execMaxY = -Infinity;
   for (const node of execLaid.nodes) {
+    const size = estimateExecNodeSize(node.data);
     execMinY = Math.min(execMinY, node.position.y);
-    execMaxY = Math.max(execMaxY, node.position.y);
+    execMaxY = Math.max(execMaxY, node.position.y + size.height);
   }
   const execMidY = Number.isFinite(execMinY) ? (execMinY + execMaxY) / 2 : 0;
   const offsetY = centerY - execMidY;
@@ -414,9 +450,7 @@ function layoutMegaGraph({
     id: `bridge-${bridgeFrom}-${step.id}`,
     source: bridgeFrom,
     target: `exec:${step.id}`,
-    animated: true,
-    style: { stroke: CRT.textSoft, strokeDasharray: "8 5", strokeWidth: 2 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: CRT.textSoft },
+    ...graphEdge(true, { bridge: true }),
   }));
 
   const subLaid = layoutSubagentNodes(subagents, execNodes);
@@ -528,7 +562,7 @@ function App() {
   const [reposLoading, setReposLoading] = useState(false);
   const [reposError, setReposError] = useState("");
   const [rightWidth, setRightWidth] = useState(400);
-  const [graphHeight, setGraphHeight] = useState(360);
+  const [graphHeight, setGraphHeight] = useState(480);
   const searchNodesRef = useRef([]);
   const searchEdgesRef = useRef([]);
   const bestPathRef = useRef([]);
@@ -994,17 +1028,30 @@ function App() {
   }, [stage, repoMode, authUser, githubRepo, loadExistingRepos]);
 
   const loadRepoIntoWorkspace = useCallback(
-    async (repo) => {
-      if (!repo?.owner || !repo?.name) return 0;
-      appendChat("system", `Loading files from ${repo.fullName}…`);
+    async (repo, { force = false } = {}) => {
+      const normalized = parseRepoIdentity(repo, authUser?.login);
+      if (!normalized.owner || !normalized.name) {
+        throw new Error(
+          `Could not resolve GitHub repo (need owner/name or fullName). Got: ${JSON.stringify(repo?.fullName || repo?.url || repo)}`
+        );
+      }
+      if (force && normalized.fullName) repoAutoLoadRef.current.delete(normalized.fullName);
+
+      appendChat("system", `Loading files from ${normalized.fullName}…`);
       const res = await fetch("/api/github/repo-files", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner: repo.owner, repoName: repo.name }),
+        body: JSON.stringify({
+          owner: normalized.owner,
+          repoName: normalized.name,
+          fullName: normalized.fullName,
+          url: normalized.url,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not load repo files");
+
       const next = {};
       for (const file of data.files || []) {
         next[file.path] = {
@@ -1012,38 +1059,69 @@ function App() {
           agent: "GitHub",
           filename: file.path,
           status: "complete",
-          summary: `From ${repo.fullName}`,
+          summary: `From ${normalized.fullName}`,
         };
       }
       const count = Object.keys(next).length;
       if (count) {
         setFileSystem(next);
         setActiveFile(data.files[0]?.path || null);
-        const truncatedNote = data.truncated ? " (large repo — first 120 text files)" : "";
-        appendChat("system", `Loaded ${count} file(s) from GitHub (${data.branch || "main"})${truncatedNote}.`);
-      } else {
+        setGithubRepo((current) => ({ ...current, ...normalized }));
+        if (normalized.fullName) repoAutoLoadRef.current.add(normalized.fullName);
+        const truncatedNote = data.truncated ? " (large repo — first 120 source files)" : "";
         appendChat(
           "system",
-          `Repo linked but no readable text files were found on ${data.branch || "main"}. Is the repo empty?`
+          `Loaded ${count} file(s) from GitHub (${data.branch || "main"})${truncatedNote}.`
+        );
+      } else {
+        const stats = data.stats
+          ? ` — ${data.stats.candidates} candidates, ${data.stats.treeEntries} tree entries`
+          : "";
+        appendChat(
+          "system",
+          `No importable source files found on ${data.branch || "main"}${stats}. Build artifacts in public/ are skipped.`
         );
       }
-      if (repo.fullName) repoAutoLoadRef.current.add(repo.fullName);
       return count;
     },
-    [appendChat]
+    [appendChat, authUser?.login]
+  );
+
+  const importRepoFromGitHub = useCallback(
+    async (force = true) => {
+      if (!githubRepo) {
+        appendChat("system", "Link a GitHub repo first (repo step).");
+        setStage("repo");
+        return 0;
+      }
+      if (!authUser?.authenticated) {
+        window.location.assign("/api/auth/github");
+        return 0;
+      }
+      setRepoBusy(true);
+      try {
+        return await loadRepoIntoWorkspace(githubRepo, { force });
+      } catch (error) {
+        appendChat("system", error.message || "GitHub import failed");
+        return 0;
+      } finally {
+        setRepoBusy(false);
+      }
+    },
+    [githubRepo, authUser, loadRepoIntoWorkspace, appendChat, setStage]
   );
 
   const ensureRepoInWorkspace = useCallback(
     async (repo = githubRepo) => {
-      if (!repo?.owner || !repo?.name) return 0;
-      const source = repo.source || "existing";
-      if (source === "created") return 0;
+      const normalized = parseRepoIdentity(repo, authUser?.login);
+      if (!normalized.owner || !normalized.name) return 0;
+      if ((normalized.source || "existing") === "created") return 0;
       if (Object.keys(fileSystem).length > 0) return Object.keys(fileSystem).length;
-      const key = repo.fullName || `${repo.owner}/${repo.name}`;
+      const key = normalized.fullName || `${normalized.owner}/${normalized.name}`;
       if (repoAutoLoadRef.current.has(key) || repoLoadInFlightRef.current === key) return 0;
       repoLoadInFlightRef.current = key;
       try {
-        return await loadRepoIntoWorkspace(repo);
+        return await loadRepoIntoWorkspace(normalized);
       } catch (error) {
         appendChat("system", error.message || "Could not import repo into workspace");
         return 0;
@@ -1051,7 +1129,7 @@ function App() {
         if (repoLoadInFlightRef.current === key) repoLoadInFlightRef.current = null;
       }
     },
-    [githubRepo, fileSystem, loadRepoIntoWorkspace, appendChat]
+    [githubRepo, fileSystem, authUser?.login, loadRepoIntoWorkspace, appendChat]
   );
 
   const openExistingRepo = useCallback(
@@ -1068,11 +1146,12 @@ function App() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Could not open repo");
-        setGithubRepo(data);
-        appendChat("system", `Opened repo: ${data.url}`);
-        if ((data.source || "existing") === "existing") {
-          if (data.fullName) repoAutoLoadRef.current.delete(data.fullName);
-          await loadRepoIntoWorkspace(data);
+        const normalized = parseRepoIdentity(data, authUser?.login);
+        setGithubRepo(normalized);
+        appendChat("system", `Opened repo: ${normalized.url}`);
+        if ((normalized.source || "existing") === "existing") {
+          if (normalized.fullName) repoAutoLoadRef.current.delete(normalized.fullName);
+          await loadRepoIntoWorkspace(normalized, { force: true });
         }
       } catch (error) {
         appendChat("system", error.message || "Could not open repo");
@@ -1080,7 +1159,7 @@ function App() {
         setRepoBusy(false);
       }
     },
-    [manualRepoRef, repoSearch, repoBusy, appendChat, loadRepoIntoWorkspace]
+    [manualRepoRef, repoSearch, repoBusy, appendChat, loadRepoIntoWorkspace, authUser?.login]
   );
 
   const handleRepoSearchKey = useCallback(
@@ -1210,13 +1289,8 @@ function App() {
       }
       const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
       if (session.githubRepo) {
-        setGithubRepo(session.githubRepo);
-        const repoSource = session.githubRepo.source || "existing";
-        if (fileCount === 0 && repoSource !== "created") {
-          loadRepoIntoWorkspace(session.githubRepo).catch((error) => {
-            appendChat("system", error.message || "Could not import saved repo into workspace");
-          });
-        }
+        const normalized = parseRepoIdentity(session.githubRepo);
+        setGithubRepo(normalized);
       }
       if (session.localOnly) setLocalOnly(true);
       const hasProgress =
@@ -1293,12 +1367,12 @@ function App() {
   }, [sessionReady, paintMegaGraph]);
 
   useEffect(() => {
-    if (stage !== "ide" || !githubRepo) return;
+    if (!sessionReady || !githubRepo || !authUser?.authenticated) return;
     const source = githubRepo.source || "existing";
     if (source === "created") return;
     if (Object.keys(fileSystem).length > 0) return;
     ensureRepoInWorkspace(githubRepo);
-  }, [stage, githubRepo, fileSystem, ensureRepoInWorkspace]);
+  }, [sessionReady, stage, githubRepo, fileSystem, authUser, ensureRepoInWorkspace]);
 
   useEffect(() => {
     if (!sessionReady) return undefined;
@@ -2605,8 +2679,11 @@ function App() {
       overflow: hidden;
     }
     .graph-panel-stack .graph-canvas {
-      flex: 1;
-      min-height: 120px;
+      flex: 1.4;
+      min-height: 180px;
+    }
+    .hyper-panel.compact {
+      flex-shrink: 0;
     }
     .ide-crt .work-main {
       border-right: 2px solid #3a787899;
@@ -3001,6 +3078,24 @@ function App() {
       color: #ffcccc;
       background: #ff999922;
     }
+    .explorer-import {
+      flex-shrink: 0;
+      background: transparent;
+      border: 1px solid #3a6868;
+      color: ${CRT.textSoft};
+      padding: 2px 7px;
+      font: inherit;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+    }
+    .explorer-import:hover:not(:disabled) {
+      border-color: ${CRT.textDim};
+      background: #e7ff4a12;
+    }
+    .explorer-import:disabled { opacity: 0.5; cursor: wait; }
     .explorer-section {
       flex: 1;
       min-height: 0;
@@ -3015,10 +3110,30 @@ function App() {
       letter-spacing: 0.02em;
     }
     .explorer-empty {
-      padding: 6px 12px;
+      padding: 8px 12px;
       color: #6a7a7a;
       font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
     }
+    .explorer-import-main {
+      background: #142020;
+      border: 1px solid ${CRT.textDim};
+      color: ${CRT.textSoft};
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    .explorer-import-main:hover:not(:disabled) {
+      background: #1a2c2c;
+      box-shadow: 0 0 12px ${CRT.text}22;
+    }
+    .explorer-import-main:disabled { opacity: 0.55; cursor: wait; }
     .explorer-tree { user-select: none; }
     .explorer-row {
       display: flex;
@@ -3226,8 +3341,23 @@ function App() {
       text-transform: uppercase;
     }
     .graph-toggle.on { border-color: ${CRT.text}; color: ${CRT.textSoft}; }
-    .graph-canvas { flex: 1; min-height: 140px; height: 100%; }
-    .graph-canvas .react-flow { width: 100%; height: 100%; min-height: 140px; }
+    .graph-canvas { flex: 1; min-height: 180px; height: 100%; background: radial-gradient(ellipse at 30% 20%, #0f1a1a 0%, #080e0e 55%, #060909 100%); }
+    .graph-canvas .react-flow { width: 100%; height: 100%; min-height: 180px; }
+    .graph-canvas .react-flow__edge-path {
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .graph-canvas .react-flow__controls button {
+      background: #142020;
+      border-color: #3a6868;
+      color: ${CRT.textSoft};
+    }
+    .graph-canvas .react-flow__controls button:hover {
+      background: #1a2c2c;
+    }
+    .graph-canvas .react-flow__background pattern circle {
+      fill: #2a4444;
+    }
     .header-home {
       padding: 2px 8px;
       border: 1px solid ${CRT.textDim};
@@ -3937,11 +4067,23 @@ function App() {
                     </span>
                   </div>
                   <div className="repo-cta-row">
-                    <button className="repo-action ghost" type="button" onClick={() => {
-                      if (githubRepo?.fullName) repoAutoLoadRef.current.delete(githubRepo.fullName);
-                      setGithubRepo(null);
-                    }}>
+                    <button
+                      className="repo-action ghost"
+                      type="button"
+                      onClick={() => {
+                        if (githubRepo?.fullName) repoAutoLoadRef.current.delete(githubRepo.fullName);
+                        setGithubRepo(null);
+                      }}
+                    >
                       change repo
+                    </button>
+                    <button
+                      className="repo-action ghost"
+                      type="button"
+                      disabled={repoBusy}
+                      onClick={() => importRepoFromGitHub(true)}
+                    >
+                      {repoBusy ? "importing…" : "import files"}
                     </button>
                     <button className="repo-action ghost" type="button" onClick={openIdeDirectly}>
                       open IDE
@@ -4273,6 +4415,9 @@ function App() {
               activeFile={activeFile}
               onSelectFile={setActiveFile}
               onDeleteFile={deleteWorkspaceFile}
+              githubRepo={githubRepo}
+              onImportFromRepo={importRepoFromGitHub}
+              importBusy={repoBusy}
             />
             <div className="work-main">
               <section className="center">
@@ -4367,12 +4512,14 @@ function App() {
                             nodeTypes={flowNodeTypes}
                             onNodesChange={onNodesChange}
                             onEdgesChange={onEdgesChange}
-                            fitView
-                            fitViewOptions={{ padding: 0.2 }}
+                            defaultEdgeOptions={{ type: "smoothstep" }}
+                            minZoom={0.15}
+                            maxZoom={1.2}
                             proOptions={{ hideAttribution: true }}
                           >
-                            <Background color="#2a4a4a" gap={18} />
-                            <Controls showInteractive={false} />
+                            <GraphAutoFit signature={`${nodes.length}:${edges.length}:${searchPhase}`} />
+                            <Background color="#243838" gap={22} size={1.2} />
+                            <Controls showInteractive={false} position="bottom-left" />
                           </ReactFlow>
                         )}
                       </div>

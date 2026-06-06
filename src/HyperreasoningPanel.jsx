@@ -91,8 +91,9 @@ export default function HyperreasoningPanel({
   }, [branches, comparisons]);
 
   useEffect(() => {
-    if (isSearching || branchRows.length > 0) setExpanded(true);
-  }, [isSearching, branchRows.length]);
+    if (isSearching) setExpanded(true);
+    else if (phase === "executing") setExpanded(false);
+  }, [isSearching, phase]);
 
   const maxScore = useMemo(
     () => Math.max(1, ...branchRows.map((branch) => branch.score || 0)),

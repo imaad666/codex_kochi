@@ -101,7 +101,15 @@ function TreeRows({ node, depth, fileSystem, activeFile, collapsed, onToggleFold
   return rows;
 }
 
-export default function FileExplorer({ fileSystem, activeFile, onSelectFile, onDeleteFile }) {
+export default function FileExplorer({
+  fileSystem,
+  activeFile,
+  onSelectFile,
+  onDeleteFile,
+  githubRepo,
+  onImportFromRepo,
+  importBusy = false,
+}) {
   const paths = Object.keys(fileSystem);
   const tree = useMemo(() => buildFileTree(paths), [paths]);
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -116,6 +124,7 @@ export default function FileExplorer({ fileSystem, activeFile, onSelectFile, onD
   };
 
   const activeName = activeFile ? activeFile.split("/").pop() : "";
+  const canImport = Boolean(githubRepo && onImportFromRepo);
 
   return (
     <aside className="explorer crt-scroll">
@@ -130,12 +139,38 @@ export default function FileExplorer({ fileSystem, activeFile, onSelectFile, onD
           >
             Delete{activeName ? ` · ${activeName}` : ""}
           </button>
+        ) : canImport ? (
+          <button
+            type="button"
+            className="explorer-import"
+            disabled={importBusy}
+            onClick={() => onImportFromRepo(true)}
+            title={`Import source files from ${githubRepo.fullName || "GitHub"}`}
+          >
+            {importBusy ? "Importing…" : "Import repo"}
+          </button>
         ) : null}
       </div>
       <div className="explorer-section">
         <div className="explorer-section-label">Open IDE</div>
         {paths.length === 0 ? (
-          <div className="explorer-empty">No files yet</div>
+          <div className="explorer-empty">
+            {canImport ? (
+              <>
+                <span>No files in workspace</span>
+                <button
+                  type="button"
+                  className="explorer-import-main"
+                  disabled={importBusy}
+                  onClick={() => onImportFromRepo(true)}
+                >
+                  {importBusy ? "Importing from GitHub…" : `Import from ${githubRepo.fullName || "repo"}`}
+                </button>
+              </>
+            ) : (
+              "No files yet"
+            )}
+          </div>
         ) : (
           <div className="explorer-tree">
             <TreeRows

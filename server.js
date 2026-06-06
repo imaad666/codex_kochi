@@ -26,6 +26,7 @@ import {
   listUserRepos,
   loadGitHubRepoFiles,
   openGitHubRepo,
+  parseRepoIdentity,
   pushRunToGitHub,
 } from "./github.js";
 import { startRunPreview } from "./runPreview.js";
@@ -677,15 +678,21 @@ app.post("/api/github/repo-files", async (req, res) => {
     if (!user?.token) {
       return res.status(401).json({ error: "Sign in with GitHub first" });
     }
-    const owner = String(req.body?.owner || req.body?.repoOwner || user.login).trim();
-    const name = String(req.body?.repoName || req.body?.name || "").trim();
-    if (!name) {
-      return res.status(400).json({ error: "Repo name is required" });
-    }
+    const identity = parseRepoIdentity(
+      {
+        owner: req.body?.owner || req.body?.repoOwner,
+        name: req.body?.repoName || req.body?.name,
+        fullName: req.body?.fullName,
+        url: req.body?.url,
+      },
+      user.login
+    );
     const result = await loadGitHubRepoFiles({
       token: user.token,
-      owner,
-      name,
+      owner: identity.owner,
+      name: identity.name,
+      fullName: identity.fullName,
+      login: user.login,
     });
     res.json(result);
   } catch (error) {
