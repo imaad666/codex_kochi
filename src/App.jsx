@@ -175,11 +175,14 @@ function layoutSearchGraph(rawNodes, rawEdges, bestPath = [], rankdir = "LR") {
       type: "planBranch",
       data: {
         label: n.title,
+        prompt: n.prompt || "",
+        branchPrompt: n.branchPrompt || "",
         status,
         score: n.score,
         rank: n.rank,
         shortSummary: n.shortSummary || "",
-        rationale: n.rationaleSummary || "",
+        rationale: n.rationaleSummary || n.rationale || "",
+        pruneReason: n.pruneReason || "",
         stepCount: n.stepCount,
         agentsUsed: n.agentsUsed,
         maxScore,
@@ -213,7 +216,12 @@ function layoutSearchGraph(rawNodes, rawEdges, bestPath = [], rankdir = "LR") {
     ranksep: rankdir === "LR" ? 90 : 70,
   });
   nodes.forEach((n) =>
-    g.setNode(n.id, { width: n.data.isRoot ? 170 : 210, height: n.data.isRoot ? 58 : 98 })
+    g.setNode(n.id, {
+      width: n.data.isRoot ? 220 : 260,
+      height: n.data.isRoot
+        ? Math.min(150, 78 + Math.ceil(String(n.data.prompt || "").length / 36) * 11)
+        : Math.min(190, 118 + Math.ceil(String(n.data.branchPrompt || "").length / 34) * 10),
+    })
   );
   edges.forEach((e) => g.setEdge(e.source, e.target));
   dagre.layout(g);
@@ -221,15 +229,15 @@ function layoutSearchGraph(rawNodes, rawEdges, bestPath = [], rankdir = "LR") {
   return {
     nodes: nodes.map((n) => {
       const { x, y } = g.node(n.id);
-      const yOffset = n.data.isRoot ? 28 : 49;
-      const xOffset = n.data.isRoot ? 82 : 102;
+      const yOffset = n.data.isRoot ? 36 : 56;
+      const xOffset = n.data.isRoot ? 108 : 128;
       return { ...n, position: { x: x - xOffset, y: y - yOffset } };
     }),
     edges,
   };
 }
 
-function layoutGraph(steps = [], agentStatus = {}, rankdir = "LR") {
+function layoutGraph(steps = [], agentStatus = {}, stepStatus = {}, rankdir = "LR") {
   if (!Array.isArray(steps) || !steps.length) return { nodes: [], edges: [] };
   const nodes = steps.map((s) => ({
     id: s.id,
@@ -238,7 +246,8 @@ function layoutGraph(steps = [], agentStatus = {}, rankdir = "LR") {
       label: s.title,
       agent: s.agent,
       description: s.description,
-      status: agentStatus[s.agent] || "planned",
+      status: stepStatus[s.id] || agentStatus[s.agent] || "planned",
+      isSubagent: Boolean(stepStatus[s.id]),
     },
     position: { x: 0, y: 0 },
     style: { background: "transparent", border: "none", padding: 0 },
@@ -397,6 +406,8 @@ function App() {
   const searchGraphRef = useRef({ nodes: [], edges: [] });
   const searchPhaseRef = useRef("idle");
   const executionGraphRef = useRef({ nodes: [], edges: [] });
+  const stepStatusRef = useRef({});
+  const planStepsRef = useRef([]);
   const promptInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const inspoFileInputRef = useRef(null);
@@ -439,8 +450,9 @@ function App() {
   );
 
   const hydrateExecutionGraph = useCallback(
-    (steps, { agentStatus = {} } = {}) => {
-      const laid = layoutGraph(steps, agentStatus);
+    (steps, { agentStatus = {}, stepStatus = stepStatusRef.current } = {}) => {
+      planStepsRef.current = steps;
+      const laid = layoutGraph(steps, agentStatus, stepStatus);
       executionGraphRef.current = laid;
       setPlanSteps(steps);
       return laid;
@@ -448,9 +460,21 @@ function App() {
     []
   );
 
+  const paintExecutionGraph = useCallback((agentStatus = {}) => {
+    const steps = planStepsRef.current;
+    if (!steps?.length) return;
+    const laid = layoutGraph(steps, agentStatus, stepStatusRef.current);
+    executionGraphRef.current = laid;
+    if (searchPhaseRef.current !== "searching") {
+      setNodes(laid.nodes);
+      setEdges(laid.edges);
+    }
+  }, [setNodes, setEdges]);
+
   const swarmHandlers = useCallback(
     () => ({
       "run-started": ({ runId }) => {
+        stepStatusRef.current = {};
         setStatus((current) => ({ ...current, runId, runPath: "" }));
       },
       "search-started": ({ subtitle }) => {
@@ -530,7 +554,21 @@ function App() {
         if (summary) setPlanSummary(summary);
         if (winnerId) setSearchWinner(winnerId);
         if (verdict) setSearchVerdict(verdict);
-        if (comparisons?.length) setSearchComparisons(comparisons);
+        if (comparisons?.length) {
+          setSearchComparisons(comparisons);
+          const byId = new Map(comparisons.map((row) => [row.id, row]));
+          searchNodesRef.current = searchNodesRef.current.map((node) => {
+            const row = byId.get(node.id);
+            if (!row) return node;
+            return {
+              ...node,
+              branchPrompt: row.summary || node.branchPrompt,
+              rationaleSummary: row.rationale || node.rationaleSummary,
+              pruneReason: row.pruneReason || node.pruneReason,
+            };
+          });
+          paintSearchGraph();
+        }
         if (savings) setSearchSavings(savings);
         appendSearchLog(`Winner selected. Plan: ${summary || "ready"}`);
         const verdictLine = verdict?.headline
@@ -541,7 +579,35 @@ function App() {
       },
       "graph-ready": ({ steps, summary }) => {
         if (summary) setPlanSummary(summary);
-        hydrateExecutionGraph(steps || []);
+        stepStatusRef.current = {};
+        const laid = hydrateExecutionGraph(steps || []);
+        setNodes(laid.nodes);
+        setEdges(laid.edges);
+      },
+      "subagent-spawned": ({ displayName, stepTitle, stepId, model, stepIndex, stepCount, parentAgent }) => {
+        if (stepId) stepStatusRef.current[stepId] = "running";
+        paintExecutionGraph({ [parentAgent]: "running" });
+        const shortModel = String(model || "").split("/").pop() || model;
+        appendChat(
+          "system",
+          `↳ ${displayName || parentAgent} subagent ${stepIndex}/${stepCount}: ${stepTitle}${shortModel ? ` · ${shortModel}` : ""}`
+        );
+      },
+      "subagent-status": ({ stepId, status: subStatus, message, parentAgent }) => {
+        if (stepId && subStatus) stepStatusRef.current[stepId] = subStatus;
+        paintExecutionGraph(parentAgent ? { [parentAgent]: "running" } : {});
+        if (message && subStatus === "running") {
+          appendSearchLog(`Subagent ${message}`);
+        }
+      },
+      "subagent-complete": ({ stepId, displayName, files, parentAgent, model }) => {
+        if (stepId) stepStatusRef.current[stepId] = "complete";
+        paintExecutionGraph({ [parentAgent]: "running" });
+        appendChat(
+          "agent",
+          `${displayName || parentAgent} subagent done → ${(files || []).join(", ") || "files updated"}`,
+          { agent: parentAgent }
+        );
       },
       "agent-status": ({ agent, status: agentStatus }) => {
         if (agentStatus === "running") {
@@ -616,7 +682,7 @@ function App() {
         );
       },
     }),
-    [setNodes, paintSearchGraph, hydrateExecutionGraph, appendChat, appendSearchLog]
+    [setNodes, paintSearchGraph, hydrateExecutionGraph, paintExecutionGraph, appendChat, appendSearchLog]
   );
 
   useEffect(() => {
@@ -3162,6 +3228,16 @@ function App() {
       letter-spacing: 0.05em;
       text-transform: uppercase;
       color: ${CRT.textDim};
+    }
+    .hr-branch-prompt {
+      margin: 5px 0 0;
+      font-size: 10px;
+      line-height: 1.35;
+      color: ${CRT.textSoft};
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .hr-score-row { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
     .hr-score-bar {

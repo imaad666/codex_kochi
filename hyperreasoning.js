@@ -257,7 +257,14 @@ export async function runHyperreasoning(emit, { runId, intent, agents, attachmen
   await sleep(280);
   emit("search-node", {
     runId,
-    node: { id: "root", parentId: null, title: intent.slice(0, 80) || "Build task", status: "ROOT", depth: 0 },
+    node: {
+      id: "root",
+      parentId: null,
+      title: "Build prompt",
+      prompt: intent.trim() || "Build task",
+      status: "ROOT",
+      depth: 0,
+    },
   });
 
   const raw = await fetchCandidates(intent, agents, attachments);
@@ -292,6 +299,7 @@ export async function runHyperreasoning(emit, { runId, intent, agents, attachmen
         shortSummary: formatStrategy(c.strategy),
         strategy: c.strategy,
         rationaleSummary: c.rationale,
+        branchPrompt: c.summary,
         status: "IDLE",
         depth: 1,
         childIndex: i,

@@ -26,7 +26,14 @@ export function PlanBranchNode({ data }) {
       <div className="flow-node plan-node root-node">
         <Handle type="source" position={Position.Right} style={{ opacity: 0.35 }} />
         <div className="flow-node-title">{data.label}</div>
-        <div className="flow-node-meta">Your build intent</div>
+        {data.prompt ? (
+          <div className="flow-node-prompt-block">
+            <span className="flow-node-prompt-label">Prompt</span>
+            <div className="flow-node-prompt">{data.prompt}</div>
+          </div>
+        ) : (
+          <div className="flow-node-meta">Your build intent</div>
+        )}
         <div className="flow-node-badge status-planned">{label}</div>
       </div>
     );
@@ -41,6 +48,12 @@ export function PlanBranchNode({ data }) {
       </div>
       <div className="flow-node-title">{data.label}</div>
       {data.shortSummary ? <div className="flow-node-strategy">{data.shortSummary}</div> : null}
+      {data.branchPrompt ? (
+        <div className="flow-node-prompt-block">
+          <span className="flow-node-prompt-label">Branch prompt</span>
+          <div className="flow-node-prompt">{data.branchPrompt}</div>
+        </div>
+      ) : null}
       {data.score != null ? (
         <div className="flow-node-score-wrap">
           <div className="flow-node-score-bar">
@@ -55,6 +68,7 @@ export function PlanBranchNode({ data }) {
         </div>
       ) : null}
       {data.rationale ? <div className="flow-node-rationale">{data.rationale}</div> : null}
+      {data.pruneReason ? <div className="flow-node-prune">{data.pruneReason}</div> : null}
       <Handle type="source" position={Position.Right} style={{ opacity: 0.35 }} />
     </div>
   );
@@ -66,7 +80,7 @@ export function ExecStepNode({ data }) {
     <div className="flow-node exec-node">
       <Handle type="target" position={Position.Top} style={{ opacity: 0.35 }} />
       <div className="flow-node-title">{data.label}</div>
-      {data.agent ? <div className="flow-node-meta">{data.agent}</div> : null}
+      {data.agent ? <div className="flow-node-meta">{data.agent}{data.isSubagent ? " · subagent" : ""}</div> : null}
       <div className={`flow-node-badge status-${status}`}>{status.toUpperCase()}</div>
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0.35 }} />
     </div>
@@ -81,7 +95,7 @@ export const flowNodeTypes = {
 export const flowNodeCss = `
   .flow-node {
     min-width: 168px;
-    max-width: 240px;
+    max-width: 280px;
     padding: 10px 12px;
     border-radius: 4px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -166,6 +180,43 @@ export const flowNodeCss = `
     color: #9ab0b0;
     display: -webkit-box;
     -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .flow-node-prompt-block {
+    margin-top: 6px;
+    padding: 6px 7px;
+    border: 1px solid #3a686866;
+    border-radius: 3px;
+    background: #0a1414;
+  }
+  .flow-node-prompt-label {
+    display: block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: ${CRT.led};
+    margin-bottom: 4px;
+  }
+  .flow-node-prompt {
+    font-size: 10px;
+    line-height: 1.4;
+    color: ${CRT.textSoft};
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .flow-node-prune {
+    margin-top: 5px;
+    font-size: 9px;
+    line-height: 1.3;
+    color: #ff9a9a;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

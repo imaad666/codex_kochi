@@ -983,7 +983,7 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
           <div className="intro-slide-inner">
             <RevealBlock className="intro-section-head">
               <h2>The cards</h2>
-              <p>Four agents. One controller. Each card owns a lane in the swarm.</p>
+              <p>Four agents. One controller. Each card spawns subagents — one Groq call per plan step.</p>
             </RevealBlock>
             <div className="intro-cards-grid">
               {AGENT_CARDS.map((card, index) => (

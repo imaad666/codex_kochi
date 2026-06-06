@@ -2,6 +2,14 @@ const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_PLANNER = "meta-llama/llama-4-scout-17b-16e-instruct";
 const DEFAULT_WORKER = "meta-llama/llama-4-scout-17b-16e-instruct";
 
+/** Per-card defaults — matches .env.vercel.template when env overrides are unset. */
+export const AGENT_DEFAULT_MODELS = {
+  ALTBOT: "meta-llama/llama-4-scout-17b-16e-instruct",
+  FRONTEND: "llama-3.3-70b-versatile",
+  BACKEND: "qwen/qwen3-32b",
+  DATABASE: "llama-3.1-8b-instant",
+};
+
 export class GroqError extends Error {
   constructor(message, status = null) {
     super(message);
@@ -38,11 +46,13 @@ export function agentGroqConfig(agentKey = "altbot") {
   const perKey = process.env[`GROQ_${envPrefix}_API_KEY`] || "";
   const perModel = process.env[`GROQ_${envPrefix}_MODEL`] || "";
   const isPlanner = envPrefix === "ALTBOT";
+  const defaultModel =
+    AGENT_DEFAULT_MODELS[envPrefix] || (isPlanner ? global.plannerModel : global.workerModel);
   return {
     ...global,
     agentKey: envPrefix,
     apiKey: perKey || global.apiKey,
-    model: perModel || (isPlanner ? global.plannerModel : global.workerModel),
+    model: perModel || defaultModel,
   };
 }
 

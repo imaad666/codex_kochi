@@ -4,13 +4,15 @@ import ivesCard from "../cards/jonyives_IVESUI.jpg";
 import wzdataCard from "../cards/steveaoz_WZDATA.jpg";
 
 export const GROQ_MODEL_DEFAULTS = {
-  planner: "meta-llama/llama-4-scout-17b-16e-instruct",
-  worker: "meta-llama/llama-4-scout-17b-16e-instruct",
+  altbot: "meta-llama/llama-4-scout-17b-16e-instruct",
+  frontend: "llama-3.3-70b-versatile",
+  backend: "qwen/qwen3-32b",
+  database: "llama-3.1-8b-instant",
 };
 
 export function formatGroqModel(modelId = "") {
   const slug = String(modelId).split("/").pop() || modelId;
-  return slug.replace(/-16e-instruct$/i, "").replace(/-/g, " ");
+  return slug.replace(/-16e-instruct$/i, "").replace(/-versatile$/i, "").replace(/-instant$/i, "").replace(/-/g, " ");
 }
 
 export const AGENT_CARDS = [
@@ -20,7 +22,7 @@ export const AGENT_CARDS = [
     description: "Plans and routes the swarm",
     image: altbotCard,
     locked: true,
-    model: GROQ_MODEL_DEFAULTS.planner,
+    model: GROQ_MODEL_DEFAULTS.altbot,
     introBlurb:
       "Altbot is always on. It runs hyperreasoning, scores three architectural branches, kills the losers before any agent writes code, and routes your chat to the right specialist.",
   },
@@ -30,7 +32,7 @@ export const AGENT_CARDS = [
     description: "Architecture and API systems",
     image: jobalyserCard,
     agent: "Backend",
-    model: GROQ_MODEL_DEFAULTS.worker,
+    model: GROQ_MODEL_DEFAULTS.backend,
     introBlurb:
       "Jobalyser owns the server. APIs, routes, middleware, and system design — streamed live into server.js and whatever backend files your build needs.",
   },
@@ -40,7 +42,7 @@ export const AGENT_CARDS = [
     description: "Interface and experience",
     image: ivesCard,
     agent: "Frontend",
-    model: GROQ_MODEL_DEFAULTS.worker,
+    model: GROQ_MODEL_DEFAULTS.frontend,
     introBlurb:
       "Ives UI owns what people see. React components, layout, interaction, and visual polish — written in real time while you watch the editor update.",
   },
@@ -50,7 +52,7 @@ export const AGENT_CARDS = [
     description: "Schema and data contracts",
     image: wzdataCard,
     agent: "Database",
-    model: GROQ_MODEL_DEFAULTS.worker,
+    model: GROQ_MODEL_DEFAULTS.database,
     introBlurb:
       "WzData owns the data layer. Schemas, migrations, contracts, and persistence — aligned with what Frontend and Backend are building in parallel.",
   },
@@ -60,7 +62,7 @@ export const INTRO_MANIFESTO = {
   headline: "You describe the product. The swarm builds it.",
   paragraphs: [
     "Open IDE is not a chatbot that dumps code into a paste bin. It is a real-time multi-agent development environment — repo-first, Groq-powered, and built for people who want to see architecture get decided before tokens get burned.",
-    "You connect GitHub. You say what you want. Altbot generates three genuinely different plans, ranks them in the open, and deploys only the winner. Frontend, Backend, and Database agents write into a live workspace you can download, run, or push.",
+    "You connect GitHub. You say what you want. Altbot generates three genuinely different plans, ranks them in the open, and deploys only the winner. Each card agent spawns step-scoped subagents — own model, own lane — writing into a live workspace you can download, run, or push.",
     "This is what coding with a swarm actually looks like — not one model guessing, but specialized agents with a controller that chooses.",
   ],
 };

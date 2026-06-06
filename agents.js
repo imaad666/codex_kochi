@@ -214,3 +214,44 @@ export function workerPrompt({ intent, plan, agent, attachments = [], sharedCont
     .filter(Boolean)
     .join("\n");
 }
+
+export function subagentPrompt({
+  intent,
+  plan,
+  agent,
+  step,
+  attachments = [],
+  sharedContext = "",
+  priorSummaries = [],
+}) {
+  return [
+    `You are a subagent of ${agent.title}. Complete ONLY the assigned step below — do not scope-creep into other agents' lanes.`,
+    `Step: ${step.title}`,
+    `Step detail: ${String(step.description || "").slice(0, 800)}`,
+    `User intent: ${String(intent || "").slice(0, 1200)}`,
+    `Controller summary: ${String(plan.summary || "").slice(0, 500)}`,
+    `Primary target filename: ${agent.file}`,
+    priorSummaries.length
+      ? `Prior subagent output this run:\n${priorSummaries.join("\n")}`
+      : "",
+    sharedContext ? `Upstream agent context:\n${String(sharedContext).slice(0, 1400)}` : "",
+    attachmentText(attachments, 500),
+    "Return only the files needed for this step. One helper file max.",
+    "Use the ---FILE / ---END FILE--- block format from your system instructions.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function workerSystemPrompt(agent) {
+  return [
+    agent.systemPrompt,
+    "You are an autonomous subagent — focused, lane-bound, and concise.",
+    "Return source files using EXACTLY this format for each file:",
+    "---FILE: relative/path ---",
+    "<full file contents>",
+    "---END FILE---",
+    "Do not use JSON. Do not use markdown fences outside file blocks.",
+    "Keep each file concise — MVP scope only.",
+  ].join("\n");
+}

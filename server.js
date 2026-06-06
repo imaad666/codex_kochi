@@ -41,12 +41,12 @@ import {
   agentChatSystem,
   attachmentContent,
   selectedAgents,
-  workerPrompt,
 } from "./agents.js";
 import { GroqError, agentGroqConfig, groqConfig, groqJson, groqText, truncateText } from "./groq.js";
 import { runHyperreasoning } from "./hyperreasoning.js";
 import { resolveInspoAttachments, searchInspiration } from "./inspo-agent.js";
 import { createSessionId, loadSession, saveSession } from "./sessions.js";
+import { listAgentModels, runAgentSubagents } from "./subagents.js";
 
 try {
   process.loadEnvFile();
@@ -165,94 +165,9 @@ function inspoSummaryAttachments(inspoSelection = []) {
   ];
 }
 
-function stripModelReasoning(text) {
-  return String(text || "")
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, "")
-    .trim();
-}
-
-function parseWorkerText(text, agent) {
-  const files = [];
-  const raw = stripModelReasoning(text);
-  const re = /---FILE:\s*([^\n]+?)\s*---\n([\s\S]*?)(?:\n---END FILE---|$)/gi;
-  let match = re.exec(raw);
-  while (match) {
-    const filename = String(match[1] || "").trim();
-    const code = stripCodeFence(String(match[2] || "").trim());
-    if (filename && code) {
-      files.push({
-        filename,
-        code,
-        summary: `${agent.title} generated ${filename}`,
-      });
-    }
-    match = re.exec(raw);
-  }
-
-  if (!files.length) {
-    const code = stripCodeFence(raw.trim());
-    if (code) {
-      files.push({
-        filename: agent.file,
-        code,
-        summary: `${agent.title} generated ${agent.file}`,
-      });
-    }
-  }
-
-  if (!files.length) {
-    throw new GroqError(`${agent.title} returned no file content`);
-  }
-
-  return {
-    summary: `${agent.title} completed ${files.map((file) => file.filename).join(", ")}`,
-    files,
-  };
-}
-
-async function runAgent({ intent, plan, agent, attachments, inspoImages = [], sharedContext = "" }) {
-  const provider = agentGroqConfig(agent.title);
-  const visionAttachments =
-    agent.title === "Frontend" && inspoImages.length
-      ? [...attachments.filter((item) => item.kind !== "image"), ...inspoImages]
-      : attachments;
-  const includeImages = agent.title === "Frontend" && inspoImages.length > 0;
-  const user = attachmentContent(
-    workerPrompt({ intent, plan, agent, attachments: visionAttachments, sharedContext }),
-    visionAttachments,
-    { includeImages }
-  );
-  const system = [
-    agent.systemPrompt,
-    "Return source files using EXACTLY this format for each file:",
-    "---FILE: relative/path ---",
-    "<full file contents>",
-    "---END FILE---",
-    "Do not use JSON. Do not use markdown fences outside file blocks.",
-    "Keep each file concise — MVP scope only.",
-  ].join("\n");
-
-  let lastError = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const text = await groqText({
-        system,
-        user,
-        model: provider.model,
-        apiKey: provider.apiKey,
-        agentKey: agent.title,
-        maxTokens: 1600,
-        temperature: 0.2 + attempt * 0.05,
-      });
-      return parseWorkerText(text, agent);
-    } catch (error) {
-      lastError = error;
-      if (attempt < 2) await sleep(500 * (attempt + 1));
-    }
-  }
-
-  throw lastError || new GroqError(`${agent.title} generation failed`);
+function stripCodeFence(value) {
+  const match = value.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$/);
+  return match ? match[1].trim() : value;
 }
 
 function agentSteps(plan, agent) {
@@ -379,11 +294,6 @@ function coerceOutput(agent, output) {
   };
 }
 
-function stripCodeFence(value) {
-  const match = value.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$/);
-  return match ? match[1].trim() : value;
-}
-
 async function executeSwarm({ emit, intent, plan, agents, attachments, inspoImages = [] }) {
   const pending = new Map(agents.map((agent) => [agent.title, agent]));
   const completed = new Map();
@@ -422,7 +332,8 @@ async function executeSwarm({ emit, intent, plan, agents, attachments, inspoImag
       });
       const output = coerceOutput(
         agent,
-        await runAgent({
+        await runAgentSubagents({
+          emit,
           intent,
           plan,
           agent,
@@ -526,12 +437,18 @@ app.use(cookieParser());
 app.use(express.json({ limit: "32mb" }));
 app.get("/api/health", (_req, res) => {
   const config = groqConfig();
+  const altbot = agentGroqConfig("altbot");
   res.json({
     ok: Boolean(config.apiKey),
     provider: "groq",
-    plannerModel: config.plannerModel,
+    plannerModel: altbot.model,
     workerModel: config.workerModel,
-    serverVersion: 3,
+    agentModels: [
+      { agent: "Altbot", displayName: "Altbot", model: altbot.model },
+      ...listAgentModels(),
+    ],
+    subagents: true,
+    serverVersion: 4,
     githubAuth: githubConfigured(),
     tokenBudget: {
       maxOutputTokens: config.maxOutputTokens,

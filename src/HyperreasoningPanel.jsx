@@ -41,6 +41,9 @@ function BranchCard({ branch, winnerId, maxScore, compact = false }) {
         ) : null}
       </div>
       <div className="hr-strategy">{branch.strategyLabel || branch.shortSummary || branch.strategy}</div>
+      {branch.summary || branch.branchPrompt ? (
+        <p className="hr-branch-prompt">{branch.summary || branch.branchPrompt}</p>
+      ) : null}
       <div className="hr-score-row">
         <div className="hr-score-bar">
           <div className="hr-score-fill" style={{ width: `${scorePct}%` }} />
@@ -81,6 +84,8 @@ export default function HyperreasoningPanel({
         pruneReason: branch.pruneReason || byId.get(branch.id)?.pruneReason,
         strategyLabel: byId.get(branch.id)?.strategyLabel || branch.shortSummary,
         rationale: byId.get(branch.id)?.rationale || branch.rationaleSummary,
+        summary: byId.get(branch.id)?.summary || branch.branchPrompt || branch.summary,
+        branchPrompt: branch.branchPrompt || byId.get(branch.id)?.summary,
       }))
       .sort((a, b) => (a.rank || 99) - (b.rank || 99));
   }, [branches, comparisons]);
