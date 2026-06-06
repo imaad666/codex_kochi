@@ -28,6 +28,7 @@ import {
   pushRunToGitHub,
 } from "./github.js";
 import { startRunPreview } from "./runPreview.js";
+import { execTerminalCommand } from "./terminal.js";
 import { createRunZipBuffer } from "./zipRun.js";
 import { runFilePath, runManifestPath } from "./runFiles.js";
 import { storage } from "./storage.js";
@@ -532,7 +533,24 @@ app.get("/api/health", (_req, res) => {
       minGapMs: config.minGapMs,
       mode: "conservative",
     },
+    storage: {
+      remote: storage.isRemote,
+      ephemeral: storage.isEphemeral,
+    },
   });
+});
+
+app.post("/api/terminal/exec", async (req, res) => {
+  try {
+    const command = String(req.body?.command || "").trim();
+    const runId = String(req.body?.runId || "").trim() || undefined;
+    const output = await execTerminalCommand({ command, runId });
+    res.json({ output });
+  } catch (error) {
+    res.status(error instanceof GroqError ? 400 : 500).json({
+      error: error instanceof GroqError ? error.message : error.message || "Terminal command failed",
+    });
+  }
 });
 
 app.get("/api/auth/github", (_req, res) => {

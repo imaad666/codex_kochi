@@ -3,6 +3,9 @@ import { dirname, join } from "path";
 import { head, list, put } from "@vercel/blob";
 
 const USE_BLOB = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+const IS_VERCEL = Boolean(process.env.VERCEL);
+/** Vercel serverless has a read-only project dir; /tmp is writable per invocation. */
+const LOCAL_ROOT = IS_VERCEL ? join("/tmp", ".open-ide") : ".open-ide";
 
 function enoent() {
   const error = new Error("ENOENT");
@@ -41,17 +44,18 @@ async function blobList(prefix) {
 }
 
 export function dataRoot() {
-  return USE_BLOB ? "" : ".open-ide";
+  return USE_BLOB ? "" : LOCAL_ROOT;
 }
 
 export function dataPath(...parts) {
   const cleaned = parts.filter(Boolean);
   if (USE_BLOB) return cleaned.join("/");
-  return join(".open-ide", ...cleaned);
+  return join(LOCAL_ROOT, ...cleaned);
 }
 
 export const storage = {
   isRemote: USE_BLOB,
+  isEphemeral: IS_VERCEL && !USE_BLOB,
 
   async exists(relPath) {
     if (USE_BLOB) return blobExists(relPath);

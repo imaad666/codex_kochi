@@ -15,7 +15,7 @@ import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
 import { AGENT_CARDS } from "./agentCards.js";
 import FileExplorer from "./FileExplorer.jsx";
-import HyperreasoningPanel from "./HyperreasoningPanel.jsx";
+import TerminalPanel from "./TerminalPanel.jsx";
 import IntroSite, { introCss } from "./IntroSite.jsx";
 import { flowNodeCss, flowNodeTypes } from "./FlowNodes.jsx";
 import {
@@ -88,7 +88,10 @@ function nodeStyle(status = "planned") {
   };
 }
 
-function Monitor({ children, full }) {
+function Monitor({ children, full, bare }) {
+  if (bare) {
+    return <div className="viewport viewport-full ide-viewport">{children}</div>;
+  }
   return (
     <div className={`viewport ${full ? "viewport-full" : ""}`}>
       <div className={`monitor ${full ? "monitor-full" : ""}`}>
@@ -310,7 +313,8 @@ function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [searchPhase, setSearchPhase] = useState("idle");
-  const [graphView, setGraphView] = useState("search");
+  const [bottomPanelTab, setBottomPanelTab] = useState("terminal");
+  const [cloudMode, setCloudMode] = useState(false);
   const [searchLog, setSearchLog] = useState([]);
   const [searchWinner, setSearchWinner] = useState(null);
   const [searchVerdict, setSearchVerdict] = useState(null);
@@ -348,7 +352,6 @@ function App() {
   const searchEdgesRef = useRef([]);
   const bestPathRef = useRef([]);
   const searchGraphRef = useRef({ nodes: [], edges: [] });
-  const graphViewRef = useRef("search");
   const searchPhaseRef = useRef("idle");
   const executionGraphRef = useRef({ nodes: [], edges: [] });
   const promptInputRef = useRef(null);
@@ -369,15 +372,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    graphViewRef.current = graphView;
-  }, [graphView]);
-
-  useEffect(() => {
     searchPhaseRef.current = searchPhase;
   }, [searchPhase]);
 
   const paintSearchGraph = useCallback(
-    (force = false) => {
+    () => {
       const laid = layoutSearchGraph(
         searchNodesRef.current,
         searchEdgesRef.current,
@@ -389,31 +388,20 @@ function App() {
         edges: [...searchEdgesRef.current],
         bestPath: [...bestPathRef.current],
       });
-      if (
-        force ||
-        graphViewRef.current === "search" ||
-        searchPhaseRef.current === "searching"
-      ) {
-        setNodes(laid.nodes);
-        setEdges(laid.edges);
-      }
+      setNodes(laid.nodes);
+      setEdges(laid.edges);
     },
     [setNodes, setEdges]
   );
 
   const hydrateExecutionGraph = useCallback(
-    (steps, { agentStatus = {}, show = true } = {}) => {
+    (steps, { agentStatus = {} } = {}) => {
       const laid = layoutGraph(steps, agentStatus);
       executionGraphRef.current = laid;
       setPlanSteps(steps);
-      if (show) {
-        setNodes(laid.nodes);
-        setEdges(laid.edges);
-        setGraphView("execute");
-      }
       return laid;
     },
-    [setNodes, setEdges]
+    []
   );
 
   const swarmHandlers = useCallback(
@@ -423,8 +411,7 @@ function App() {
       },
       "search-started": ({ subtitle }) => {
         setSearchPhase("searching");
-        setGraphView("search");
-        graphViewRef.current = "search";
+        setBottomPanelTab("graph");
         searchPhaseRef.current = "searching";
         searchNodesRef.current = [];
         searchEdgesRef.current = [];
@@ -449,11 +436,11 @@ function App() {
         } else {
           appendSearchLog(`Branch: ${node.title} (${node.shortSummary || "candidate"})`);
         }
-        paintSearchGraph(true);
+        paintSearchGraph();
       },
       "search-edge": ({ parentId, childId }) => {
         searchEdgesRef.current = [...searchEdgesRef.current, { parentId, childId }];
-        paintSearchGraph(true);
+        paintSearchGraph();
       },
       "search-scored": ({ id, score, rank, breakdown }) => {
         const hit = searchNodesRef.current.find((node) => node.id === id);
@@ -471,7 +458,7 @@ function App() {
             : node
         );
         appendSearchLog(`Scored ${hit?.title || id}: ${score} (rank #${rank})`);
-        paintSearchGraph(true);
+        paintSearchGraph();
       },
       "search-node-status": ({ nodeId, status: nodeStatus }) => {
         const hit = searchNodesRef.current.find((node) => node.id === nodeId);
@@ -479,7 +466,7 @@ function App() {
           node.id === nodeId ? { ...node, status: nodeStatus } : node
         );
         appendSearchLog(`${hit?.title || nodeId} → ${nodeStatus}`);
-        paintSearchGraph(true);
+        paintSearchGraph();
       },
       "search-pruned": ({ nodeId, reason }) => {
         const hit = searchNodesRef.current.find((node) => node.id === nodeId);
@@ -487,13 +474,13 @@ function App() {
           node.id === nodeId ? { ...node, status: "PRUNED", pruneReason: reason } : node
         );
         appendSearchLog(`Pruned ${hit?.title || nodeId}: ${reason || "lower score"}`);
-        paintSearchGraph(true);
+        paintSearchGraph();
       },
       "search-best-path": ({ nodeIds, winnerId }) => {
         bestPathRef.current = nodeIds || [];
         if (winnerId) setSearchWinner(winnerId);
         appendSearchLog(`Best path locked → ${(nodeIds || []).join(" → ")}`);
-        paintSearchGraph(true);
+        paintSearchGraph();
       },
       "search-finished": ({ summary, winnerId, verdict, savings, comparisons }) => {
         if (summary) setPlanSummary(summary);
@@ -506,39 +493,19 @@ function App() {
           ? `${verdict.headline}. ${verdict.body || ""}`
           : `Hyperreasoning picked the winning branch. ${summary || "Deploying swarm…"}`;
         appendChat("controller", verdictLine.trim());
-        setTimeout(() => {
-          setSearchPhase("executing");
-          setGraphView("execute");
-          if (executionGraphRef.current.nodes.length) {
-            setNodes(executionGraphRef.current.nodes);
-            setEdges(executionGraphRef.current.edges);
-          }
-        }, 2200);
+        setSearchPhase("executing");
       },
       "graph-ready": ({ steps, summary }) => {
         if (summary) setPlanSummary(summary);
-        hydrateExecutionGraph(steps || [], { show: false });
-        appendChat("system", `Execution graph ready — ${steps?.length || 0} steps queued.`);
+        hydrateExecutionGraph(steps || []);
       },
-      "agent-status": ({ agent, status: agentStatus, stepIds = [] }) => {
+      "agent-status": ({ agent, status: agentStatus }) => {
         if (agentStatus === "running") {
           setRunningAgents((current) => [...new Set([...current, agent])]);
         }
         if (agentStatus === "complete" || agentStatus === "error") {
           setRunningAgents((current) => current.filter((item) => item !== agent));
         }
-        setNodes((current) =>
-          current.map((node) => {
-            const ownsStep = stepIds.includes(node.id) || node.data?.agent === agent;
-            if (!ownsStep) return node;
-            const nextStatus = agentStatus === "ready" ? "ready" : agentStatus;
-            return {
-              ...node,
-              data: { ...node.data, status: nextStatus },
-              style: { background: "transparent", border: "none", padding: 0 },
-            };
-          })
-        );
       },
       "agent-started": ({ agent, filename }) => {
         setRunningAgents((current) => [...new Set([...current, agent])]);
@@ -622,6 +589,7 @@ function App() {
           error: data.serverVersion < 3 ? "Backend is outdated. Restart npm run dev." : "",
         }));
         setGithubConfigured(Boolean(data.githubAuth));
+        setCloudMode(Boolean(data.storage?.ephemeral));
       })
       .catch(() => {
         setStatus((current) => ({
@@ -993,7 +961,6 @@ function App() {
               }
               hydrateExecutionGraph(manifest.plan?.steps || session.planSteps || [], {
                 agentStatus,
-                show: false,
               });
             }
           }
@@ -1009,7 +976,7 @@ function App() {
           for (const entry of Object.values(session.fileSystem)) {
             if (entry?.agent && entry.status === "complete") agentStatus[entry.agent] = "complete";
           }
-          hydrateExecutionGraph(session.planSteps, { agentStatus, show: false });
+          hydrateExecutionGraph(session.planSteps, { agentStatus });
         }
       }
       setSessionReady(true);
@@ -1093,24 +1060,11 @@ function App() {
   useEffect(() => {
     if (stage !== "ide" || Object.keys(fileSystem).length === 0) return;
     if (searchPhase === "searching") return;
-    if (searchGraphRef.current.nodes.length && graphView === "search") return;
-    if (executionGraphRef.current.nodes.length && nodes.length === 0) {
-      setNodes(executionGraphRef.current.nodes);
-      setEdges(executionGraphRef.current.edges);
-      setGraphView("execute");
-      return;
+    if (searchGraphRef.current.nodes.length && nodes.length === 0) {
+      setNodes(searchGraphRef.current.nodes);
+      setEdges(searchGraphRef.current.edges);
     }
-    if (
-      executionGraphRef.current.nodes.length &&
-      graphView === "search" &&
-      searchNodesRef.current.length === 0 &&
-      searchPhase !== "searching"
-    ) {
-      setGraphView("execute");
-      setNodes(executionGraphRef.current.nodes);
-      setEdges(executionGraphRef.current.edges);
-    }
-  }, [stage, fileSystem, nodes.length, graphView, searchPhase, setNodes, setEdges]);
+  }, [stage, fileSystem, nodes.length, searchPhase, setNodes, setEdges]);
 
   useEffect(() => {
     if (stage !== "prompt") return undefined;
@@ -1478,7 +1432,7 @@ function App() {
     setActiveFile(null);
     setRunningAgents([]);
     setSearchPhase("searching");
-    setGraphView("search");
+    setBottomPanelTab("graph");
     setSearchLog([]);
     setSearchWinner(null);
     setPlanSummary("");
@@ -1523,36 +1477,19 @@ function App() {
   ]);
 
   const showSearchGraph = useCallback(() => {
-    setGraphView("search");
-    graphViewRef.current = "search";
-    if (searchGraphRef.current.nodes.length) {
-      setNodes(searchGraphRef.current.nodes);
-      setEdges(searchGraphRef.current.edges);
-      return;
-    }
-    paintSearchGraph(true);
-  }, [setNodes, setEdges, paintSearchGraph]);
-
-  const showExecuteGraph = useCallback(() => {
-    setGraphView("execute");
-    graphViewRef.current = "execute";
-    setNodes(executionGraphRef.current.nodes);
-    setEdges(executionGraphRef.current.edges);
-  }, [setNodes, setEdges]);
+    setBottomPanelTab("graph");
+    paintSearchGraph();
+  }, [paintSearchGraph]);
 
   const launchFromIntro = useCallback(() => setStage("repo"), []);
   const resumeFromIntro = useCallback(() => {
     const target =
       savedSession?.stage && savedSession.stage !== "intro" ? savedSession.stage : "ide";
     setStage(target);
-    if (executionGraphRef.current.nodes.length) {
-      setGraphView("execute");
-      setNodes(executionGraphRef.current.nodes);
-      setEdges(executionGraphRef.current.edges);
-    } else if (searchGraphRef.current.nodes.length) {
-      setGraphView("search");
+    if (searchGraphRef.current.nodes.length) {
       setNodes(searchGraphRef.current.nodes);
       setEdges(searchGraphRef.current.edges);
+      setBottomPanelTab("graph");
     }
   }, [savedSession, setNodes, setEdges]);
 
@@ -2049,6 +1986,223 @@ function App() {
       position: relative;
       z-index: 2;
     }
+    .ide-viewport {
+      background: #1e1e1e;
+    }
+    .ide-shell {
+      background: #1e1e1e;
+      color: #cccccc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .ide-titlebar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 36px;
+      padding: 0 12px;
+      background: #252526;
+      border-bottom: 1px solid #1e1e1e;
+      font-size: 12px;
+    }
+    .ide-titlebar-btn {
+      background: transparent;
+      border: 0;
+      color: #cccccc;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 0;
+    }
+    .ide-titlebar-btn:hover { color: #fff; }
+    .ide-titlebar-repo {
+      color: #9cdcfe;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ide-titlebar-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ide-toolbar-btn {
+      background: #333333;
+      border: 1px solid #454545;
+      color: #cccccc;
+      padding: 3px 10px;
+      font: inherit;
+      font-size: 11px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .ide-toolbar-btn:hover:not(:disabled) {
+      background: #3c3c3c;
+      color: #fff;
+    }
+    .ide-toolbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .ide-statusbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 22px;
+      padding: 0 12px;
+      background: #007acc;
+      color: #fff;
+      font-size: 11px;
+    }
+    .ide-status-item { opacity: 0.95; }
+    .ide-status-item:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ide-bottom-panel {
+      flex-shrink: 0;
+      min-height: 120px;
+      max-height: 480px;
+      display: flex;
+      flex-direction: column;
+      background: #1e1e1e;
+      border-top: 1px solid #252526;
+    }
+    .panel-tabs {
+      flex-shrink: 0;
+      display: flex;
+      gap: 0;
+      background: #252526;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .panel-tab {
+      position: relative;
+      background: transparent;
+      border: 0;
+      border-right: 1px solid #1e1e1e;
+      color: #969696;
+      padding: 6px 14px;
+      font: inherit;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+    .panel-tab.on {
+      color: #fff;
+      background: #1e1e1e;
+      border-bottom: 1px solid #1e1e1e;
+      margin-bottom: -1px;
+    }
+    .panel-tab-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin-left: 6px;
+      border-radius: 50%;
+      background: #c7da2e;
+      vertical-align: middle;
+      animation: explorer-pulse 1.2s ease-in-out infinite;
+    }
+    .panel-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .graph-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6a6a6a;
+      font-size: 12px;
+      padding: 16px;
+    }
+    .terminal-panel {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #0c0c0c;
+      font-family: "JetBrains Mono", Menlo, monospace;
+      font-size: 12px;
+    }
+    .terminal-log {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 8px 10px;
+      color: #cccccc;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .terminal-line-input { color: #fff; margin-bottom: 4px; }
+    .terminal-line-output { color: #cccccc; margin-bottom: 6px; }
+    .terminal-line-system { color: #6a9955; margin-bottom: 6px; }
+    .terminal-line-error { color: #f48771; margin-bottom: 6px; }
+    .terminal-input-row {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-top: 1px solid #252526;
+      background: #1a1a1a;
+    }
+    .terminal-prompt { color: #4ec9b0; flex-shrink: 0; }
+    .terminal-input {
+      flex: 1;
+      background: transparent;
+      border: 0;
+      color: #fff;
+      font: inherit;
+      font-size: 12px;
+      outline: none;
+    }
+    .ide-shell .chat {
+      flex: 1;
+      min-height: 0;
+      border-bottom: 0;
+      background: #1e1e1e;
+    }
+    .ide-shell .chat-head {
+      color: #cccccc;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      background: #252526;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .ide-shell .chat-tabs {
+      background: #252526;
+      border-bottom: 1px solid #1e1e1e;
+      padding: 4px 8px;
+    }
+    .ide-shell .chat-tab {
+      font-size: 11px;
+      border-radius: 3px;
+      text-transform: none;
+    }
+    .ide-shell .chat-log {
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .ide-shell .chat-input-row {
+      border-top: 1px solid #1e1e1e;
+      background: #252526;
+    }
+    .ide-shell .chat-input {
+      background: #3c3c3c;
+      border: 1px solid #454545;
+      border-radius: 3px;
+      color: #cccccc;
+      font-size: 12px;
+    }
+    .ide-shell .chat-send {
+      font-size: 11px;
+      border-radius: 3px;
+    }
+    .panel-body .graph-canvas {
+      flex: 1;
+      min-height: 0;
+    }
     .ide-workspace {
       flex: 1;
       display: flex;
@@ -2502,7 +2656,8 @@ function App() {
       min-height: 0;
       display: flex;
       flex-direction: column;
-      border-right: 2px solid #3a787899;
+      border-right: 1px solid #252526;
+      background: #1e1e1e;
     }
     .center {
       flex: 1;
@@ -2514,9 +2669,9 @@ function App() {
     .resize-handle-v,
     .resize-handle-h {
       flex-shrink: 0;
-      background: ${CRT.beigeLo};
-      opacity: 0.55;
-      transition: opacity 0.15s;
+      background: #252526;
+      opacity: 1;
+      transition: background 0.15s;
       z-index: 4;
     }
     .resize-handle-v {
@@ -2533,8 +2688,7 @@ function App() {
     }
     .resize-handle-v:hover,
     .resize-handle-h:hover {
-      opacity: 0.9;
-      background: ${CRT.textDim};
+      background: #007acc;
     }
     .tabs {
       display: flex;
@@ -2571,8 +2725,8 @@ function App() {
       display: flex;
       flex-direction: column;
       min-height: 0;
-      border-left: 0;
-      background: #00000010;
+      border-left: 1px solid #252526;
+      background: #252526;
     }
     .graph-dock {
       flex-shrink: 0;
@@ -3542,66 +3696,50 @@ function App() {
   return (
     <>
       <style>{css}</style>
-      <Monitor full>
-        <div className="ide">
-            <header className="header">
-              <button type="button" className="header-home" onClick={goHome} title="Back to intro">
-                ⌂ Home
-              </button>
-              <span>
-                SWARM · GROQ · {status.workerModel || "CONNECTING"}
-                {status.runId ? ` · RUN ${status.runId.slice(0, 8)}` : ""}
-                {status.tokenBudget?.mode ? ` · BUDGET ${status.tokenBudget.mode.toUpperCase()}` : ""}
+      <Monitor full bare>
+        <div className="ide ide-shell">
+          <header className="ide-titlebar">
+            <button type="button" className="ide-titlebar-btn" onClick={goHome} title="Home">
+              Open IDE
+            </button>
+            {githubRepo ? (
+              <span className="ide-titlebar-repo" title={githubRepo.url}>
+                {githubRepo.fullName}
               </span>
-              <span style={{ color: CRT.textDim, marginLeft: "auto" }}>
-                {status.error
-                  ? `ERROR · ${status.error}`
-                  : searchPhase === "searching"
-                    ? "HYPERREASONING…"
-                    : runningAgents.length
-                      ? `DEPLOYING ${runningAgents.join(" + ")}…`
-                      : "READY"}
-              </span>
+            ) : null}
+            <div className="ide-titlebar-actions">
+              {hasOutput ? (
+                <>
+                  <button type="button" className="ide-toolbar-btn" disabled={!!outputBusy} onClick={downloadZip}>
+                    Export
+                  </button>
+                  <button
+                    type="button"
+                    className="ide-toolbar-btn"
+                    disabled={!!outputBusy || !hasBackend}
+                    onClick={runPreview}
+                    title={hasBackend ? "Run server.js locally" : "Needs server.js"}
+                  >
+                    {outputBusy === "run" ? "Starting…" : "Preview"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ide-toolbar-btn"
+                    disabled={!!outputBusy || !githubRepo}
+                    onClick={pushToGitHub}
+                  >
+                    {outputBusy === "push" ? "Pushing…" : "Push"}
+                  </button>
+                </>
+              ) : null}
               {authUser?.authenticated ? (
-                <span className="auth-chip" style={{ marginLeft: 8 }}>
+                <span className="auth-chip">
                   {authUser.avatar ? <img src={authUser.avatar} alt="" /> : null}@{authUser.login}
                 </span>
               ) : null}
-            </header>
-            {hasOutput && (
-              <div className="output-bar">
-                <span style={{ color: CRT.textDim }}>OUTPUT →</span>
-                <button type="button" className="output-btn" disabled={!!outputBusy} onClick={downloadZip}>
-                  B · DOWNLOAD ZIP
-                </button>
-                <button
-                  type="button"
-                  className="output-btn"
-                  disabled={!!outputBusy || !hasBackend}
-                  onClick={runPreview}
-                  title={hasBackend ? "Run generated server.js locally" : "Needs server.js"}
-                >
-                  C · {outputBusy === "run" ? "STARTING…" : "RUN PREVIEW"}
-                </button>
-                <button
-                  type="button"
-                  className="output-btn"
-                  disabled={!!outputBusy || !githubRepo}
-                  onClick={pushToGitHub}
-                  title={githubRepo ? `Push to ${githubRepo.fullName}` : "Create a repo first"}
-                >
-                  A · {outputBusy === "push" ? "PUSHING…" : githubRepo ? `PUSH TO ${githubRepo.name}` : "NEEDS REPO"}
-                </button>
-                <span className="output-hint">
-                  {githubRepo
-                    ? `target: ${githubRepo.fullName}`
-                    : previewUrl
-                      ? `preview: ${previewUrl}`
-                      : "create a repo first"}
-                </span>
-              </div>
-            )}
-            <div className="ide-workspace">
+            </div>
+          </header>
+          <div className="ide-workspace">
             <FileExplorer
               fileSystem={fileSystem}
               activeFile={activeFile}
@@ -3610,27 +3748,34 @@ function App() {
             <div className="work-main">
               <section className="center">
                 <div className="tabs">
-                  {files.map((filename) => (
-                    <span
-                      key={filename}
-                      className={`tab ${activeFile === filename ? "on" : ""}`}
-                      onClick={() => setActiveFile(filename)}
-                      title={filename}
-                    >
-                      {basename(filename)}
-                    </span>
-                  ))}
+                  {files.length === 0 ? (
+                    <span className="tab on">Welcome</span>
+                  ) : (
+                    files.map((filename) => (
+                      <span
+                        key={filename}
+                        className={`tab ${activeFile === filename ? "on" : ""}`}
+                        onClick={() => setActiveFile(filename)}
+                        title={filename}
+                      >
+                        {basename(filename)}
+                      </span>
+                    ))
+                  )}
                 </div>
                 <div className="editor">
                   <Editor
                     theme="vs-dark"
                     language={languageForFile(activeFile)}
-                    value={activeFileEntry?.code || "// WAITING FOR GENERATED FILES…"}
+                    value={activeFileEntry?.code || "// Open a repo or run a swarm to load files"}
                     options={{
                       minimap: { enabled: false },
-                      fontSize: 14,
-                      fontFamily: "VT323, monospace",
+                      fontSize: 13,
+                      fontFamily: '"JetBrains Mono", "Fira Code", Menlo, monospace',
+                      lineNumbers: "on",
                       readOnly: true,
+                      scrollBeyondLastLine: false,
+                      padding: { top: 8 },
                     }}
                   />
                 </div>
@@ -3638,53 +3783,61 @@ function App() {
               <div
                 className="resize-handle-h"
                 role="separator"
-                aria-label="Resize graph panel"
+                aria-label="Resize bottom panel"
                 onMouseDown={startResizeGraph}
               />
-              <section className="graph-dock" style={{ height: graphHeight }}>
-                <div className="graph">
-                  <div className="graph-head">
-                    <span>ALTBOT · PLAN GRAPH</span>
-                    <button
-                      type="button"
-                      className={`graph-toggle ${graphView === "search" ? "on" : ""}`}
-                      onClick={showSearchGraph}
-                    >
-                      SEARCH
-                    </button>
-                    <button
-                      type="button"
-                      className={`graph-toggle ${graphView === "execute" ? "on" : ""}`}
-                      onClick={showExecuteGraph}
-                    >
-                      EXEC
-                    </button>
-                  </div>
-                  <HyperreasoningPanel
-                    phase={searchPhase}
-                    branches={searchGraphData.branches}
-                    comparisons={searchComparisons}
-                    verdict={searchVerdict}
-                    savings={searchSavings}
-                    winnerId={searchWinner}
-                    agentCount={selected.length}
-                  />
-                  <div className="graph-canvas">
-                    <ReactFlow
-                      key={`flow-${graphView}-${nodes.length}`}
-                      nodes={nodes}
-                      edges={edges}
-                      nodeTypes={flowNodeTypes}
-                      onNodesChange={onNodesChange}
-                      onEdgesChange={onEdgesChange}
-                      fitView={nodes.length > 0}
-                      fitViewOptions={{ padding: 0.2 }}
-                      proOptions={{ hideAttribution: true }}
-                    >
-                      <Background color="#3a7878" gap={20} />
-                      <Controls showInteractive={false} />
-                    </ReactFlow>
-                  </div>
+              <section className="ide-bottom-panel" style={{ height: graphHeight }}>
+                <div className="panel-tabs">
+                  <button
+                    type="button"
+                    className={`panel-tab ${bottomPanelTab === "terminal" ? "on" : ""}`}
+                    onClick={() => setBottomPanelTab("terminal")}
+                  >
+                    Terminal
+                  </button>
+                  <button
+                    type="button"
+                    className={`panel-tab ${bottomPanelTab === "graph" ? "on" : ""}`}
+                    onClick={() => {
+                      setBottomPanelTab("graph");
+                      showSearchGraph();
+                    }}
+                  >
+                    Plan graph
+                    {searchPhase === "searching" ? <span className="panel-tab-dot" /> : null}
+                  </button>
+                </div>
+                <div className="panel-body">
+                  {bottomPanelTab === "terminal" ? (
+                    <TerminalPanel
+                      fileSystem={fileSystem}
+                      githubRepo={githubRepo}
+                      runId={status.runId}
+                      cloudMode={cloudMode}
+                      onOpenFile={setActiveFile}
+                    />
+                  ) : (
+                    <div className="graph-canvas">
+                      {nodes.length === 0 ? (
+                        <div className="graph-empty">Run a swarm to see Altbot&apos;s hyperreasoning graph</div>
+                      ) : (
+                        <ReactFlow
+                          key={`flow-${nodes.length}`}
+                          nodes={nodes}
+                          edges={edges}
+                          nodeTypes={flowNodeTypes}
+                          onNodesChange={onNodesChange}
+                          onEdgesChange={onEdgesChange}
+                          fitView
+                          fitViewOptions={{ padding: 0.2 }}
+                          proOptions={{ hideAttribution: true }}
+                        >
+                          <Background color="#2a4a4a" gap={18} />
+                          <Controls showInteractive={false} />
+                        </ReactFlow>
+                      )}
+                    </div>
+                  )}
                 </div>
               </section>
             </div>
@@ -3696,7 +3849,7 @@ function App() {
             />
             <aside className="right crt-scroll" style={{ width: rightWidth }}>
               <div className="chat">
-                <div className="chat-head">CHAT · ROUTING</div>
+                <div className="chat-head">Agents</div>
                 <div className="chat-tabs">
                   {chatTargets.map((target) => (
                     <button
@@ -3706,14 +3859,13 @@ function App() {
                       onClick={() => setChatTarget(target.id)}
                     >
                       {target.label}
-                      <span className="chat-tab-sub">{target.subtitle}</span>
                     </button>
                   ))}
                 </div>
                 <div className="chat-log crt-scroll">
                   {chatMessages.length === 0 && (
                     <div className="chat-line chat-speaker-system">
-                      <strong>SYSTEM:</strong> Message Altbot for the full picture, or pick an agent tab for lane-specific help.
+                      Ask Altbot to orchestrate, or switch tabs for lane-specific help.
                     </div>
                   )}
                   {chatMessages.map((msg) => {
@@ -3741,13 +3893,26 @@ function App() {
                     aria-label="Chat message"
                   />
                   <button type="button" className="chat-send" onClick={sendChat}>
-                    SEND
+                    Send
                   </button>
                 </div>
               </div>
-              {renderInspoBoard()}
             </aside>
-            </div>
+          </div>
+          <footer className="ide-statusbar">
+            <span className="ide-status-item">
+              {status.error
+                ? status.error
+                : searchPhase === "searching"
+                  ? "Hyperreasoning…"
+                  : runningAgents.length
+                    ? `Deploying: ${runningAgents.join(", ")}`
+                    : "Ready"}
+            </span>
+            <span className="ide-status-item">{status.workerModel || "Groq"}</span>
+            {status.runId ? <span className="ide-status-item">Run {status.runId.slice(0, 8)}</span> : null}
+            {files.length ? <span className="ide-status-item">{files.length} files</span> : null}
+          </footer>
         </div>
       </Monitor>
     </>
