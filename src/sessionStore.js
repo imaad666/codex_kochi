@@ -1,3 +1,5 @@
+import { sessionPromptPreview } from "../repoUtils.js";
+
 const SESSION_KEY = "open-ide-session-id";
 
 export function getOrCreateSessionId() {
@@ -52,6 +54,22 @@ export function hydrateFileSystemFromSession(fileSystem = {}, removedPaths = [])
     };
   }
   return next;
+}
+
+export function buildSavedSessionSummary(session) {
+  if (!session) return null;
+  const fileCount = session.fileSystem ? Object.keys(session.fileSystem).length : 0;
+  const resumeDismissed = Boolean(session.resumeDismissed);
+  const hasProgress =
+    !resumeDismissed &&
+    Boolean(session.prompt || session.githubRepo || session.runId || fileCount > 0);
+  return {
+    hasProgress,
+    prompt: sessionPromptPreview(session.prompt),
+    fileCount,
+    stage: session.stage,
+    resumeDismissed,
+  };
 }
 
 export async function loadRunFiles(runId, manifest) {

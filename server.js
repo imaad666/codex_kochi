@@ -48,6 +48,7 @@ import { runHyperreasoning } from "./hyperreasoning.js";
 import { resolveInspoAttachments, searchInspiration } from "./inspo-agent.js";
 import { createSessionId, loadSession, saveSession } from "./sessions.js";
 import { listAgentModels, runAgentSubagents } from "./subagents.js";
+import { sessionPromptPreview } from "./repoUtils.js";
 
 try {
   process.loadEnvFile();
@@ -943,6 +944,7 @@ async function runSwarmGeneration(emit, body = {}) {
   const config = groqConfig();
   const {
     prompt,
+    userPrompt: rawUserPrompt,
     agents: requestedAgents,
     attachments = [],
     inspoSelection = [],
@@ -1012,12 +1014,16 @@ async function runSwarmGeneration(emit, body = {}) {
   });
 
   if (sessionId) {
+    const savedPrompt =
+      truncateText(String(rawUserPrompt || "").trim(), 800) ||
+      sessionPromptPreview(intent);
     await saveSession(sessionId, {
       runId,
       runPath: runManifestPath(runId).replace("/manifest.json", ""),
-      prompt: intent,
+      prompt: savedPrompt,
       selectedAgents: agents.map((agent) => agent.title),
       stage: "ide",
+      resumeDismissed: false,
     });
   }
 }

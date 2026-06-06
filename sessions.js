@@ -28,6 +28,7 @@ const DEFAULT_SESSION = {
   removedPaths: [],
   activeFile: null,
   searchPhase: "idle",
+  resumeDismissed: false,
 };
 
 function slimInspoCandidates(candidates = []) {

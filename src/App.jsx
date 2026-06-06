@@ -22,7 +22,7 @@ import HyperreasoningPanel from "./HyperreasoningPanel.jsx";
 import IntroSite, { introCss } from "./IntroSite.jsx";
 import { flowNodeCss, flowNodeTypes } from "./FlowNodes.jsx";
 import GraphAutoFit from "./GraphAutoFit.jsx";
-import { parseRepoIdentity } from "../repoUtils.js";
+import { parseRepoIdentity, sessionPromptPreview } from "../repoUtils.js";
 import {
   CLEAR_GITHUB_REPO_REPLY,
   CLEAR_WORKSPACE_REPLY,
@@ -37,6 +37,7 @@ import {
   hydrateFileSystemFromSession,
   loadRunFiles,
   proxyImageUrl,
+  buildSavedSessionSummary,
 } from "./sessionStore.js";
 
 function formatRepoAge(iso) {
@@ -1222,6 +1223,17 @@ function App() {
     }
   }, [newRepoName, repoBusy, authUser, appendChat]);
 
+  const dismissSessionResume = useCallback(() => {
+    setSavedSession((current) =>
+      current ? { ...current, hasProgress: false, resumeDismissed: true } : null
+    );
+    if (sessionReady && sessionId) {
+      syncSession(sessionId, { resumeDismissed: true }).catch((error) =>
+        console.warn("[session]", error.message)
+      );
+    }
+  }, [sessionReady, sessionId]);
+
   const pushToGitHub = useCallback(async () => {
     const workspaceFiles = Object.entries(fileSystem)
       .map(([path, entry]) => ({
@@ -1267,13 +1279,14 @@ function App() {
       if (deletePaths.length) {
         setRemovedPaths((current) => current.filter((path) => !deletePaths.includes(path)));
       }
+      dismissSessionResume();
       window.open(data.url, "_blank", "noopener,noreferrer");
     } catch (error) {
       appendChat("system", error.message || "GitHub push failed");
     } finally {
       setOutputBusy("");
     }
-  }, [fileSystem, removedPaths, status.runId, sessionId, outputBusy, authUser, githubRepo, prompt, appendChat]);
+  }, [fileSystem, removedPaths, status.runId, sessionId, outputBusy, authUser, githubRepo, prompt, appendChat, dismissSessionResume]);
 
   const signOut = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
@@ -1293,7 +1306,7 @@ function App() {
         setSessionReady(true);
         return;
       }
-      if (session.prompt) setPrompt(session.prompt);
+      if (session.prompt) setPrompt(sessionPromptPreview(session.prompt));
       if (session.selectedAgents?.length) setSelected(session.selectedAgents);
       if (session.attachments?.length) setAttachments(session.attachments);
       if (session.inspoCandidates?.length) setInspoCandidates(session.inspoCandidates);
@@ -1329,19 +1342,10 @@ function App() {
         setGithubRepo(normalized);
       }
       if (session.localOnly) setLocalOnly(true);
-      const hasProgress =
-        session.prompt ||
-        session.githubRepo ||
-        session.runId ||
-        fileCount > 0;
-      setSavedSession({
-        hasProgress,
-        prompt: session.prompt || "",
-        fileCount,
-        stage: session.stage,
-      });
+      setSavedSession(buildSavedSessionSummary({ ...session, fileCount }));
       const params = new URLSearchParams(window.location.search);
-      if (params.get("resume") === "1" && hasProgress) {
+      const resumeMeta = buildSavedSessionSummary({ ...session, fileCount });
+      if (params.get("resume") === "1" && resumeMeta?.hasProgress) {
         setStage(session.stage && session.stage !== "intro" ? session.stage : "ide");
       } else if (params.get("launch") === "1") {
         setStage("repo");
@@ -1791,10 +1795,12 @@ function App() {
     flashSaveMessage(
       issue.ok ? `Saved ${basename(activeFile)}` : `Saved ${basename(activeFile)} (has errors)`
     );
+    dismissSessionResume();
   }, [
     activeFile,
     fileSystem,
     flashSaveMessage,
+    dismissSessionResume,
     sessionReady,
     sessionId,
     stage,
@@ -2012,7 +2018,19 @@ function App() {
         ? `Existing project files: ${fileNames.join(", ")}\n\nChange request: ${raw}`
         : raw;
 
-      if (resetWorkspace) setPrompt(raw);
+      setPrompt(raw);
+      setSavedSession((current) => ({
+        ...(current || {}),
+        hasProgress: true,
+        resumeDismissed: false,
+        prompt: raw,
+        stage: "ide",
+      }));
+      if (sessionReady) {
+        syncSession(sessionId, { resumeDismissed: false, prompt: raw, stage: "ide" }).catch((error) =>
+          console.warn("[session]", error.message)
+        );
+      }
 
       const inspoSelection = inspoCandidates
         .filter((img) => inspoSelectedIds.includes(img.id))
@@ -2025,6 +2043,7 @@ function App() {
         await streamSwarmGenerate(
           {
             prompt: swarmPrompt,
+            userPrompt: raw,
             agents: selected,
             attachments,
             inspoSelection,
@@ -2052,6 +2071,7 @@ function App() {
       inspoSelectedIds,
       attachments,
       sessionId,
+      sessionReady,
       appendChat,
       swarmHandlers,
       loadRepoIntoWorkspace,
@@ -2258,16 +2278,6 @@ function App() {
   }, [savedSession, paintMegaGraph]);
 
   const goHome = useCallback(() => setStage("intro"), []);
-
-  const editorDiagnostic = useMemo(() => {
-    if (!activeFile) return { ok: true };
-    const entry = fileSystem[activeFile];
-    return lintSource(activeFile, entry?.code || "");
-  }, [activeFile, fileSystem]);
-
-  const files = Object.keys(fileSystem);
-  const hasWorkspaceFiles = files.length > 0 && !runningAgents.length;
-  const hasRunExport = Boolean(status.runId && hasWorkspaceFiles);
 
   const renderInspoBoard = (compact = false) => (
     <div className={`inspo-board ${compact ? "compact" : ""}`}>
@@ -4603,7 +4613,14 @@ function App() {
     );
   }
 
+  const files = Object.keys(fileSystem);
   const activeFileEntry = activeFile ? fileSystem[activeFile] : null;
+  const editorDiagnostic = useMemo(() => {
+    if (!activeFile) return { ok: true };
+    return lintSource(activeFile, activeFileEntry?.code || "");
+  }, [activeFile, activeFileEntry?.code]);
+  const hasWorkspaceFiles = files.length > 0 && !runningAgents.length;
+  const hasRunExport = Boolean(status.runId && hasWorkspaceFiles);
 
   return (
     <>

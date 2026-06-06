@@ -27,3 +27,11 @@ export function parseRepoIdentity(input, fallbackLogin = "") {
     source: source.source || "existing",
   };
 }
+
+/** User-facing prompt — strip internal swarm file-list wrapper. */
+export function sessionPromptPreview(prompt = "") {
+  const text = String(prompt || "").trim();
+  if (!text) return "";
+  const match = text.match(/^Existing project files:[\s\S]*?\n\nChange request:\s*([\s\S]*)$/i);
+  return (match ? match[1] : text).trim();
+}
