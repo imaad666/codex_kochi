@@ -3,7 +3,10 @@ import { dataPath, storage } from "./storage.js";
 
 export function authConfig() {
   const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "";
-  const appUrl = process.env.APP_URL || vercelUrl || "http://localhost:5173";
+  const productionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "";
+  const appUrl = process.env.APP_URL || productionUrl || vercelUrl || "http://localhost:5173";
   const apiUrl = process.env.API_URL || appUrl || "http://localhost:3001";
   return {
     clientId: process.env.GITHUB_CLIENT_ID || "",
@@ -27,6 +30,28 @@ function sign(data) {
 export function createAuthCookie(payload) {
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${data}.${sign(data)}`;
+}
+
+export function createGitHubTokenCookie(token) {
+  const data = Buffer.from(String(token || ""), "utf8").toString("base64url");
+  return `${data}.${sign(data)}`;
+}
+
+export function parseGitHubTokenCookie(raw) {
+  if (!raw) return null;
+  const [data, sig] = String(raw).split(".");
+  if (!data || !sig) return null;
+  const expected = sign(data);
+  try {
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  } catch {
+    return null;
+  }
+  try {
+    return Buffer.from(data, "base64url").toString("utf8") || null;
+  } catch {
+    return null;
+  }
 }
 
 export function parseAuthCookie(raw) {
@@ -142,7 +167,8 @@ export async function loadGitHubToken(githubId) {
 export async function resolveAuthUser(req) {
   const cookie = parseAuthCookie(req.cookies?.open_ide_user);
   if (!cookie?.githubId) return null;
-  const token = await loadGitHubToken(cookie.githubId);
+  const tokenFromCookie = parseGitHubTokenCookie(req.cookies?.open_ide_gh_token);
+  const token = tokenFromCookie || (await loadGitHubToken(cookie.githubId));
   if (!token) return null;
   return { ...cookie, token };
 }

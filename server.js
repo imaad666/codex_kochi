@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import {
   authConfig,
   createAuthCookie,
+  createGitHubTokenCookie,
   createOAuthState,
   exchangeGitHubCode,
   fetchGitHubUser,
@@ -555,7 +556,11 @@ app.get("/api/auth/github/callback", async (req, res) => {
 
     const token = await exchangeGitHubCode(code);
     const profile = await fetchGitHubUser(token);
-    await storeGitHubToken(profile.id, token);
+    try {
+      await storeGitHubToken(profile.id, token);
+    } catch (error) {
+      console.warn("[auth] token disk/blob store failed — using cookie fallback", error?.message);
+    }
 
     const cookie = createAuthCookie({
       githubId: profile.id,
@@ -568,7 +573,11 @@ app.get("/api/auth/github/callback", async (req, res) => {
       ...authCookieOptions(),
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
-    res.redirect(`${appUrl}/?auth=ok`);
+    res.cookie("open_ide_gh_token", createGitHubTokenCookie(token), {
+      ...authCookieOptions(),
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+    res.redirect(`${appUrl}/?auth=ok&launch=1`);
   } catch (error) {
     console.error("[auth]", error);
     res.redirect(`${appUrl}/?auth_error=${encodeURIComponent(error.message || "oauth_failed")}`);
@@ -588,7 +597,10 @@ app.get("/api/auth/me", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (_req, res) => {
-  res.clearCookie("open_ide_user", { path: "/" });
+  const opts = { path: "/" };
+  res.clearCookie("open_ide_user", opts);
+  res.clearCookie("open_ide_gh_token", opts);
+  res.clearCookie("oauth_state", opts);
   res.json({ ok: true });
 });
 

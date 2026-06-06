@@ -45,8 +45,8 @@ const PROMPT_QUESTION = "WHAT DO YOU WANT TO BUILD TODAY?";
 
 function initialStage() {
   const params = new URLSearchParams(window.location.search);
+  if (params.get("auth") === "ok" || params.get("launch") === "1") return "repo";
   if (params.get("resume") === "1") return "ide";
-  if (params.get("launch") === "1") return "repo";
   return "intro";
 }
 
