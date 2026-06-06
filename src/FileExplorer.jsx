@@ -101,7 +101,7 @@ function TreeRows({ node, depth, fileSystem, activeFile, collapsed, onToggleFold
   return rows;
 }
 
-export default function FileExplorer({ fileSystem, activeFile, onSelectFile }) {
+export default function FileExplorer({ fileSystem, activeFile, onSelectFile, onDeleteFile }) {
   const paths = Object.keys(fileSystem);
   const tree = useMemo(() => buildFileTree(paths), [paths]);
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -115,9 +115,23 @@ export default function FileExplorer({ fileSystem, activeFile, onSelectFile }) {
     });
   };
 
+  const activeName = activeFile ? activeFile.split("/").pop() : "";
+
   return (
     <aside className="explorer crt-scroll">
-      <div className="explorer-header">Explorer</div>
+      <div className="explorer-header">
+        <span>Explorer</span>
+        {activeFile ? (
+          <button
+            type="button"
+            className="explorer-delete"
+            onClick={() => onDeleteFile?.(activeFile)}
+            title={`Remove ${activeFile} from workspace`}
+          >
+            Delete{activeName ? ` · ${activeName}` : ""}
+          </button>
+        ) : null}
+      </div>
       <div className="explorer-section">
         <div className="explorer-section-label">Open IDE</div>
         {paths.length === 0 ? (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import { streamSwarmGenerate, searchInspiration as fetchInspiration, postChat, syncSession } from "./eventClient.js";
 import Editor from "@monaco-editor/react";
 import {
@@ -1278,6 +1279,39 @@ function App() {
     setEdges([]);
     setStatus((current) => ({ ...current, error: "", runPath: "" }));
   }, [setNodes, setEdges]);
+
+  const deleteWorkspaceFile = useCallback(
+    (filePath) => {
+      if (!filePath || !fileSystem[filePath]) return;
+      const sorted = Object.keys(fileSystem).sort();
+      const idx = sorted.indexOf(filePath);
+      const remaining = sorted.filter((path) => path !== filePath);
+      const nextActive =
+        activeFile === filePath ? (remaining[idx] ?? remaining[idx - 1] ?? null) : activeFile;
+      setFileSystem((current) => {
+        const next = { ...current };
+        delete next[filePath];
+        return next;
+      });
+      setActiveFile(nextActive);
+      appendChat("system", `Removed ${filePath} from workspace (not deleted on GitHub until you push).`);
+    },
+    [fileSystem, activeFile, appendChat]
+  );
+
+  useEffect(() => {
+    if (stage !== "ide" || !activeFile) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const tag = event.target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || event.target?.isContentEditable) return;
+      event.preventDefault();
+      deleteWorkspaceFile(activeFile);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [stage, activeFile, deleteWorkspaceFile]);
 
   const clearGitHubRepo = useCallback(async () => {
     if (!githubRepo?.name || outputBusy) return;
@@ -2586,6 +2620,10 @@ function App() {
     }
     .explorer-header {
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       padding: 10px 12px 8px;
       font-size: 11px;
       font-weight: 600;
@@ -2593,6 +2631,28 @@ function App() {
       text-transform: uppercase;
       color: #8a9a9a;
       border-bottom: 1px solid #1e3030;
+    }
+    .explorer-delete {
+      flex-shrink: 0;
+      background: transparent;
+      border: 1px solid #6a4040;
+      color: #ff9999;
+      padding: 2px 7px;
+      font: inherit;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .explorer-delete:hover {
+      border-color: #ff7777;
+      color: #ffcccc;
+      background: #ff999922;
     }
     .explorer-section {
       flex: 1;
@@ -3842,6 +3902,7 @@ function App() {
               fileSystem={fileSystem}
               activeFile={activeFile}
               onSelectFile={setActiveFile}
+              onDeleteFile={deleteWorkspaceFile}
             />
             <div className="work-main">
               <section className="center">
@@ -4054,6 +4115,7 @@ function AppRoot() {
   return (
     <ReactFlowProvider>
       <App />
+      <Analytics />
     </ReactFlowProvider>
   );
 }

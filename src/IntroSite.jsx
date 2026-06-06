@@ -23,6 +23,133 @@ const SECTION_META = [
   { id: "launch", label: "Launch" },
 ];
 
+const TAGLINE_VERBS = ["plans", "writes", "ships", "hyperreasons"];
+
+function HeroParticles() {
+  const dots = useRef(
+    Array.from({ length: 18 }, (_, i) => ({
+      id: i,
+      left: `${8 + ((i * 17) % 84)}%`,
+      top: `${6 + ((i * 23) % 88)}%`,
+      size: 2 + (i % 3),
+      delay: `${(i * 0.37) % 4}s`,
+      duration: `${4 + (i % 5)}s`,
+    }))
+  ).current;
+
+  return (
+    <div className="intro-hero-bg" aria-hidden>
+      <div className="intro-hero-grid" />
+      <div className="intro-hero-scan" />
+      {dots.map((dot) => (
+        <span
+          key={dot.id}
+          className="intro-hero-dot"
+          style={{
+            left: dot.left,
+            top: dot.top,
+            width: dot.size,
+            height: dot.size,
+            animationDelay: dot.delay,
+            animationDuration: dot.duration,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CyclingTagline() {
+  const [index, setIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setVisible(false);
+      window.setTimeout(() => {
+        setIndex((current) => (current + 1) % TAGLINE_VERBS.length);
+        setVisible(true);
+      }, 280);
+    }, 2600);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <p className="intro-tagline">
+      The CRT-native coding swarm that{" "}
+      <span className={`intro-tagline-verb ${visible ? "in" : "out"}`}>{TAGLINE_VERBS[index]}</span>{" "}
+      before it spends.
+    </p>
+  );
+}
+
+function AnimatedStat({ stat, index, active }) {
+  const [display, setDisplay] = useState("0");
+  const numeric = /^(\d+)/.exec(stat.value);
+  const suffix = numeric ? stat.value.slice(numeric[0].length) : "";
+  const target = numeric ? Number(numeric[1]) : null;
+
+  useEffect(() => {
+    if (!active || target === null) {
+      setDisplay(stat.value);
+      return undefined;
+    }
+    let frame = 0;
+    const total = 28;
+    const timer = setInterval(() => {
+      frame += 1;
+      const progress = frame / total;
+      const eased = 1 - (1 - progress) ** 3;
+      setDisplay(String(Math.round(target * eased)));
+      if (frame >= total) clearInterval(timer);
+    }, 32);
+    return () => clearInterval(timer);
+  }, [active, target, stat.value]);
+
+  return (
+    <div
+      className="intro-stat intro-reveal visible"
+      style={{ animationDelay: `${0.55 + index * 0.12}s` }}
+    >
+      <span className="intro-stat-value">
+        {target !== null ? `${display}${suffix}` : stat.value}
+      </span>
+      <span className="intro-stat-label">{stat.label}</span>
+    </div>
+  );
+}
+
+function RevealBlock({ children, className = "", delay = 0, as: Tag = "div" }) {
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.2, rootMargin: "0px 0px -8% 0px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Tag
+      ref={ref}
+      className={`intro-reveal ${visible ? "visible" : ""} ${className}`.trim()}
+      style={{ transitionDelay: `${delay}s` }}
+    >
+      {children}
+    </Tag>
+  );
+}
+
 export const introCss = `
   .intro-shell {
     flex: 1;
@@ -52,12 +179,15 @@ export const introCss = `
     justify-content: center;
     padding: 1.25rem 3rem 1.25rem 1.25rem;
     position: relative;
+    overflow: hidden;
   }
   .intro-slide-inner {
     width: 100%;
     max-width: 1100px;
     max-height: 100%;
     overflow-y: auto;
+    position: relative;
+    z-index: 2;
   }
   .intro-slide.cards-slide {
     align-items: stretch;
@@ -109,13 +239,18 @@ export const introCss = `
     border: 2px solid ${CRT.textDim};
     background: transparent;
     flex-shrink: 0;
-    transition: transform 0.15s, background 0.15s;
+    transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
   }
   .intro-nav-dot.active i {
     background: ${CRT.textSoft};
     border-color: ${CRT.text};
     box-shadow: 0 0 10px ${CRT.text}66;
     transform: scale(1.2);
+    animation: intro-nav-pulse 2s ease-in-out infinite;
+  }
+  @keyframes intro-nav-pulse {
+    0%, 100% { box-shadow: 0 0 10px ${CRT.text}66; }
+    50% { box-shadow: 0 0 18px ${CRT.text}aa; }
   }
   .intro-resume-float {
     position: absolute;
@@ -134,6 +269,11 @@ export const introCss = `
     border-radius: 8px;
     background: #0d2828ee;
     box-shadow: 0 8px 24px #00000055;
+    animation: intro-slide-down 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes intro-slide-down {
+    from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
   }
   .intro-resume-text {
     color: ${CRT.text};
@@ -155,37 +295,102 @@ export const introCss = `
   }
   .intro-resume-btn:hover { box-shadow: 0 0 14px ${CRT.text}44; }
 
-  .intro-hero { text-align: center; }
+  .intro-reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .intro-reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .intro-hero { text-align: center; position: relative; }
+  .intro-hero-bg {
+    position: absolute;
+    inset: -20% -10%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+  .intro-hero-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(${CRT.text}08 1px, transparent 1px),
+      linear-gradient(90deg, ${CRT.text}08 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 20%, transparent 75%);
+    animation: intro-grid-drift 24s linear infinite;
+  }
+  @keyframes intro-grid-drift {
+    from { transform: perspective(400px) rotateX(8deg) translateY(0); }
+    to { transform: perspective(400px) rotateX(8deg) translateY(48px); }
+  }
+  .intro-hero-scan {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 120px;
+    background: linear-gradient(180deg, transparent, ${CRT.text}12, transparent);
+    animation: intro-scan-sweep 6s ease-in-out infinite;
+  }
+  @keyframes intro-scan-sweep {
+    0% { top: -120px; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+  .intro-hero-dot {
+    position: absolute;
+    border-radius: 50%;
+    background: ${CRT.textSoft};
+    box-shadow: 0 0 8px ${CRT.text}88;
+    animation: intro-dot-float ease-in-out infinite;
+    opacity: 0.35;
+  }
+  @keyframes intro-dot-float {
+    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.2; }
+    50% { transform: translate(6px, -14px) scale(1.4); opacity: 0.55; }
+  }
+
+  .intro-hero-logo-wrap {
+    position: relative;
+    display: inline-block;
+    margin: 0 auto 1.5rem;
+    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .intro-hero-logo-wrap::before {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    border-radius: 50%;
+    background: radial-gradient(circle, ${CRT.text}33 0%, transparent 70%);
+    animation: intro-logo-glow 3s ease-in-out infinite;
+    z-index: -1;
+  }
+  @keyframes intro-logo-glow {
+    0%, 100% { opacity: 0.5; transform: scale(0.95); }
+    50% { opacity: 1; transform: scale(1.08); }
+  }
+  @keyframes intro-hero-in {
+    from { opacity: 0; transform: translateY(20px) scale(0.92); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
   .intro-hero-logo {
     width: min(168px, 38vw);
     height: auto;
-    margin: 0 auto 1.25rem;
     display: block;
     border-radius: 6px;
-    box-shadow: 0 8px 32px #00000055;
+    box-shadow: 0 8px 32px #00000055, 0 0 40px ${CRT.text}22;
+    animation: intro-logo-float 4s ease-in-out infinite;
   }
-  .intro-hackathon {
-    margin: 0 auto 1.5rem;
-    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    letter-spacing: -0.02em;
+  @keyframes intro-logo-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
   }
-  .intro-hackathon-title {
-    margin: 0;
-    color: #ececec;
-    font-size: clamp(17px, 2.4vw, 22px);
-    font-weight: 500;
-    line-height: 1.35;
-    text-transform: none;
-    text-shadow: none;
-  }
-  .intro-hackathon-by {
-    margin: 0.35rem 0 0;
-    color: #9b9b9b;
-    font-size: clamp(13px, 1.7vw, 15px);
-    font-weight: 400;
-    line-height: 1.3;
-    text-transform: none;
-  }
+
   .intro-kicker {
     display: inline-block;
     margin-bottom: 1rem;
@@ -195,7 +400,24 @@ export const introCss = `
     font-size: 20px;
     letter-spacing: 4px;
     text-transform: uppercase;
+    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
   }
+  .intro-kicker-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 10px;
+    border-radius: 50%;
+    background: ${CRT.led};
+    box-shadow: 0 0 10px ${CRT.led};
+    vertical-align: middle;
+    animation: intro-led-blink 1.4s ease-in-out infinite;
+  }
+  @keyframes intro-led-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
   .intro-hero h1 {
     margin: 0;
     color: ${CRT.textSoft};
@@ -204,7 +426,19 @@ export const introCss = `
     line-height: 0.92;
     text-shadow: 0 0 28px #dfff3f55, 3px 3px 0 #0005;
     text-transform: uppercase;
+    animation: intro-title-in 1s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both,
+      intro-title-glow 4s ease-in-out 1.2s infinite;
+    position: relative;
   }
+  @keyframes intro-title-in {
+    from { opacity: 0; transform: translateY(24px); letter-spacing: 14px; }
+    to { opacity: 1; transform: translateY(0); letter-spacing: 6px; }
+  }
+  @keyframes intro-title-glow {
+    0%, 100% { text-shadow: 0 0 28px #dfff3f55, 3px 3px 0 #0005; }
+    50% { text-shadow: 0 0 48px #dfff3f88, 0 0 80px #dfff3f33, 3px 3px 0 #0005; }
+  }
+
   .intro-tagline {
     margin: 1.25rem auto 0;
     max-width: 780px;
@@ -212,13 +446,32 @@ export const introCss = `
     font-size: clamp(26px, 4vw, 38px);
     line-height: 1.25;
     letter-spacing: 1px;
+    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
   }
+  .intro-tagline-verb {
+    display: inline-block;
+    color: ${CRT.text};
+    text-shadow: 0 0 16px ${CRT.text}66;
+    min-width: 5.5ch;
+    text-align: left;
+    transition: opacity 0.28s ease, transform 0.28s ease;
+  }
+  .intro-tagline-verb.in {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .intro-tagline-verb.out {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
   .intro-lead {
     margin: 1.5rem auto 0;
     max-width: 820px;
     color: ${CRT.text};
     font-size: clamp(22px, 3vw, 28px);
     line-height: 1.45;
+    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.42s both;
   }
   .intro-hero-actions {
     margin-top: 2rem;
@@ -226,6 +479,7 @@ export const introCss = `
     gap: 1rem;
     justify-content: center;
     flex-wrap: wrap;
+    animation: intro-hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.54s both;
   }
   .intro-btn-primary {
     padding: 14px 32px;
@@ -238,8 +492,32 @@ export const introCss = `
     cursor: pointer;
     box-shadow: 0 0 24px ${CRT.text}33;
     letter-spacing: 2px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s, color 0.2s, box-shadow 0.2s;
+    animation: intro-btn-pulse 2.8s ease-in-out infinite;
   }
-  .intro-btn-primary:hover { color: #fff; box-shadow: 0 0 32px ${CRT.text}55; }
+  @keyframes intro-btn-pulse {
+    0%, 100% { box-shadow: 0 0 24px ${CRT.text}33; }
+    50% { box-shadow: 0 0 36px ${CRT.text}55, 0 0 60px ${CRT.text}22; }
+  }
+  .intro-btn-primary::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 40%, ${CRT.textSoft}22 50%, transparent 60%);
+    transform: translateX(-120%);
+    animation: intro-btn-shine 4s ease-in-out infinite;
+  }
+  @keyframes intro-btn-shine {
+    0%, 70%, 100% { transform: translateX(-120%); }
+    85% { transform: translateX(120%); }
+  }
+  .intro-btn-primary:hover {
+    color: #fff;
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 0 40px ${CRT.text}66;
+  }
   .intro-btn-ghost {
     padding: 14px 24px;
     border: 2px solid #3a6868;
@@ -249,8 +527,13 @@ export const introCss = `
     font-size: clamp(22px, 3vw, 28px);
     text-transform: uppercase;
     cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, transform 0.2s;
   }
-  .intro-btn-ghost:hover { border-color: ${CRT.textDim}; color: ${CRT.text}; }
+  .intro-btn-ghost:hover {
+    border-color: ${CRT.textDim};
+    color: ${CRT.text};
+    transform: translateY(-2px);
+  }
   .intro-stats {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -276,6 +559,7 @@ export const introCss = `
     text-transform: uppercase;
     letter-spacing: 1px;
   }
+
   .intro-manifesto h2 {
     margin: 0 0 1.5rem;
     color: ${CRT.textSoft};
@@ -318,6 +602,11 @@ export const introCss = `
     display: flex;
     flex-direction: column;
     color: ${CRT.textDim};
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .intro-showcase-card:hover {
+    transform: translateY(-8px) scale(1.02);
+    z-index: 2;
   }
   .intro-showcase-card .card-frame {
     display: block;
@@ -329,6 +618,11 @@ export const introCss = `
     background: #00000024;
     box-shadow: inset 0 0 18px #00000030;
     aspect-ratio: 0.72;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .intro-showcase-card:hover .card-frame {
+    border-color: ${CRT.text};
+    box-shadow: inset 0 0 18px #00000030, 0 0 24px ${CRT.text}33;
   }
   .intro-showcase-card.locked .card-frame,
   .intro-showcase-card.locked .card-copy {
@@ -342,6 +636,11 @@ export const introCss = `
     object-fit: cover;
     object-position: center;
     filter: saturate(0.85) contrast(1.05);
+    transition: transform 0.5s ease, filter 0.3s;
+  }
+  .intro-showcase-card:hover .card-image {
+    transform: scale(1.06);
+    filter: saturate(1) contrast(1.08);
   }
   .intro-showcase-card.locked .card-image {
     filter: saturate(1) contrast(1.02);
@@ -369,6 +668,11 @@ export const introCss = `
     background: #133f3fcc;
     box-shadow: inset 0 0 14px #00000028;
     text-transform: uppercase;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .intro-showcase-card:hover .card-copy {
+    border-color: ${CRT.textDim};
+    background: #1a5050dd;
   }
   .intro-showcase-card .card-name {
     display: block;
@@ -401,6 +705,12 @@ export const introCss = `
     border: 2px solid #3a686866;
     border-radius: 8px;
     background: #0a2222aa;
+    transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+  }
+  .intro-flow-item:hover {
+    border-color: ${CRT.textDim};
+    transform: translateX(6px);
+    box-shadow: -4px 0 0 ${CRT.textDim}44;
   }
   .intro-flow-item .step-num {
     color: ${CRT.led};
@@ -429,6 +739,12 @@ export const introCss = `
     padding: 1rem 1.25rem;
     border-left: 4px solid ${CRT.textDim};
     background: #08181899;
+    transition: border-color 0.3s, transform 0.3s, background 0.3s;
+  }
+  .intro-feature-block:hover {
+    border-left-color: ${CRT.textSoft};
+    background: #0d2828cc;
+    transform: translateY(-4px);
   }
   .intro-feature-block .tag {
     display: block;
@@ -456,6 +772,7 @@ export const introCss = `
     font-size: clamp(36px, 5vw, 52px);
     letter-spacing: 4px;
     text-transform: uppercase;
+    animation: intro-title-glow 4s ease-in-out infinite;
   }
   .intro-final p {
     margin: 0 auto 2rem;
@@ -464,6 +781,31 @@ export const introCss = `
     font-size: clamp(22px, 3vw, 28px);
     line-height: 1.4;
   }
+  .intro-final .intro-btn-primary {
+    animation: intro-btn-pulse 2s ease-in-out infinite, intro-hero-in 0.9s both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .intro-reveal,
+    .intro-hero-logo,
+    .intro-hero-logo-wrap,
+    .intro-hero h1,
+    .intro-kicker,
+    .intro-tagline,
+    .intro-lead,
+    .intro-hero-actions,
+    .intro-btn-primary,
+    .intro-final h2,
+    .intro-hero-grid,
+    .intro-hero-scan,
+    .intro-hero-dot,
+    .intro-nav-dot.active i {
+      animation: none !important;
+      transition: none !important;
+    }
+    .intro-reveal { opacity: 1; transform: none; }
+  }
+
   @media (max-width: 1000px) {
     .intro-cards-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
@@ -615,14 +957,17 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
         onTouchEnd={handleTouchEnd}
       >
         <section className="intro-slide" id="hero" ref={setSlideRef(0)}>
+          <HeroParticles />
           <div className="intro-slide-inner intro-hero">
-            <img className="intro-hero-logo" src="/crt.jpg" alt="Open IDE on CRT" width={168} height={168} />
-            <div className="intro-hackathon">
-              <p className="intro-hackathon-title">Built at the Codex Community Hackathon</p>
-              <p className="intro-hackathon-by">by Imaad</p>
+            <div className="intro-kicker">
+              <span className="intro-kicker-dot" aria-hidden />
+              Groq-powered swarm IDE
+            </div>
+            <div className="intro-hero-logo-wrap">
+              <img className="intro-hero-logo" src="/crt.jpg" alt="Open IDE on CRT" width={168} height={168} />
             </div>
             <h1>Open IDE</h1>
-            <p className="intro-tagline">The CRT-native coding swarm that plans before it spends.</p>
+            <CyclingTagline />
             <p className="intro-lead">
               Connect a repo. Describe what you want built. Altbot hyperreasons across three
               architectural branches, picks a winner, and deploys specialized agents into a live
@@ -639,11 +984,8 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
               ) : null}
             </div>
             <div className="intro-stats">
-              {INTRO_STATS.map((stat) => (
-                <div key={stat.label} className="intro-stat">
-                  <span className="intro-stat-value">{stat.value}</span>
-                  <span className="intro-stat-label">{stat.label}</span>
-                </div>
+              {INTRO_STATS.map((stat, index) => (
+                <AnimatedStat key={stat.label} stat={stat} index={index} active={activeIndex === 0} />
               ))}
             </div>
           </div>
@@ -651,24 +993,28 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
 
         <section className="intro-slide" id="manifesto" ref={setSlideRef(1)}>
           <div className="intro-slide-inner intro-manifesto">
-            <h2>{INTRO_MANIFESTO.headline}</h2>
-            {INTRO_MANIFESTO.paragraphs.map((paragraph) => (
-              <p key={paragraph.slice(0, 24)}>{paragraph}</p>
+            <RevealBlock as="h2">{INTRO_MANIFESTO.headline}</RevealBlock>
+            {INTRO_MANIFESTO.paragraphs.map((paragraph, index) => (
+              <RevealBlock as="p" key={paragraph.slice(0, 24)} delay={0.08 * (index + 1)}>
+                {paragraph}
+              </RevealBlock>
             ))}
           </div>
         </section>
 
         <section className="intro-slide cards-slide" id="cards" ref={setSlideRef(2)}>
           <div className="intro-slide-inner">
-            <div className="intro-section-head">
+            <RevealBlock className="intro-section-head">
               <h2>The cards</h2>
               <p>Four agents. One controller. Each card owns a lane in the swarm.</p>
-            </div>
+            </RevealBlock>
             <div className="intro-cards-grid">
-              {AGENT_CARDS.map((card) => (
-                <article
+              {AGENT_CARDS.map((card, index) => (
+                <RevealBlock
                   key={card.name}
+                  as="article"
                   className={`intro-showcase-card ${card.locked ? "locked" : ""}`}
+                  delay={0.1 * index}
                 >
                   <span className="card-frame">
                     <img className="card-image" src={card.image} alt="" />
@@ -679,7 +1025,7 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
                     <span className="card-role">{card.role}</span>
                     <span className="card-blurb">{card.introBlurb}</span>
                   </span>
-                </article>
+                </RevealBlock>
               ))}
             </div>
           </div>
@@ -687,19 +1033,19 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
 
         <section className="intro-slide" id="flow" ref={setSlideRef(3)}>
           <div className="intro-slide-inner">
-            <div className="intro-section-head">
+            <RevealBlock className="intro-section-head">
               <h2>How it works</h2>
               <p>Five steps from repo to shipped code. No black box.</p>
-            </div>
+            </RevealBlock>
             <div className="intro-flow-list">
-              {INTRO_FLOW.map((item) => (
-                <article key={item.step} className="intro-flow-item">
+              {INTRO_FLOW.map((item, index) => (
+                <RevealBlock key={item.step} as="article" className="intro-flow-item" delay={0.08 * index}>
                   <span className="step-num">{item.step}</span>
                   <div>
                     <h3>{item.title}</h3>
                     <p>{item.detail}</p>
                   </div>
-                </article>
+                </RevealBlock>
               ))}
             </div>
           </div>
@@ -707,17 +1053,17 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
 
         <section className="intro-slide" id="features" ref={setSlideRef(4)}>
           <div className="intro-slide-inner">
-            <div className="intro-section-head">
+            <RevealBlock className="intro-section-head">
               <h2>What you get</h2>
               <p>Everything inside the monitor — built for real builds.</p>
-            </div>
+            </RevealBlock>
             <div className="intro-features-grid">
-              {INTRO_FEATURES.map((feature) => (
-                <article key={feature.tag} className="intro-feature-block">
+              {INTRO_FEATURES.map((feature, index) => (
+                <RevealBlock key={feature.tag} as="article" className="intro-feature-block" delay={0.07 * index}>
                   <span className="tag">{feature.tag}</span>
                   <h3>{feature.title}</h3>
                   <p>{feature.body}</p>
-                </article>
+                </RevealBlock>
               ))}
             </div>
           </div>
@@ -725,18 +1071,19 @@ export default function IntroSite({ onLaunch, onResume, savedSession }) {
 
         <section className="intro-slide" id="launch" ref={setSlideRef(5)}>
           <div className="intro-slide-inner intro-final">
-            <h2>Enter the CRT</h2>
-            <p>
+            <RevealBlock as="h2">Enter the CRT</RevealBlock>
+            <RevealBlock as="p" delay={0.1}>
               Your repo is waiting. Your swarm is ready. Hyperreason first — then let the agents
               write.
-            </p>
-            <button type="button" className="intro-btn-primary" onClick={onLaunch}>
-              Launch Open IDE
-            </button>
+            </RevealBlock>
+            <RevealBlock delay={0.2}>
+              <button type="button" className="intro-btn-primary" onClick={onLaunch}>
+                Launch Open IDE
+              </button>
+            </RevealBlock>
           </div>
         </section>
       </div>
-
     </div>
   );
 }
