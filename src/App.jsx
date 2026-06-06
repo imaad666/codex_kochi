@@ -2154,11 +2154,23 @@ function App() {
     .ide-crt .right {
       border-left: 0;
       background: #00000012;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
     }
     .ide-crt .chat {
-      flex: 1.15;
-      min-height: 0;
+      flex: 1 1 55%;
+      min-height: 140px;
+      max-height: 62%;
       border-bottom: 2px solid #3a787866;
+    }
+    .ide-crt .inspo-board {
+      flex: 1 1 38%;
+      min-height: 200px;
+      max-height: 42%;
+      overflow: hidden;
+      border-top: 1px solid #3a787866;
     }
     .ide-workspace {
       flex: 1;
@@ -3161,7 +3173,7 @@ function App() {
     }
     .inspo-board {
       flex: 0.85;
-      min-height: 0;
+      min-height: 200px;
       display: flex;
       flex-direction: column;
       padding: 6px 8px 8px;
@@ -3261,6 +3273,19 @@ function App() {
     .cards-inspo {
       width: min(100%, 900px);
       margin-top: 0.15rem;
+    }
+    .prompt-inspo {
+      width: min(100%, 640px);
+      margin-top: 1rem;
+    }
+    .prompt-inspo .inspo-board.compact {
+      min-height: 180px;
+      max-height: 240px;
+      overflow: hidden;
+    }
+    .prompt-inspo .inspo-grid {
+      max-height: 160px;
+      overflow-y: auto;
     }
     .cards-inspo .inspo-board.compact {
       overflow: visible;
@@ -3588,6 +3613,7 @@ function App() {
                 repo · <a href={githubRepo.url} target="_blank" rel="noreferrer">{githubRepo.fullName}</a>
               </div>
             ) : null}
+            <div className="prompt-inspo">{renderInspoBoard(true)}</div>
             <button className="btn" disabled={!prompt.trim()} onClick={continueToCards}>
               CONTINUE
             </button>
