@@ -61,7 +61,20 @@ Demo or pitch video link: _coming soon_
 
 ## Screenshots
 
-Screenshots: _coming soon_
+### Welcome
+![Open IDE welcome / intro screen](screenshots/welcome_1.png)
+
+### Agents
+![Agent card selection — Altbot, Ives UI, Jobalyser, WzData](screenshots/agents.png)
+
+### IDE
+![Live IDE — file explorer, editor, terminal, and agent chat](screenshots/ide.png)
+
+### Reasoning
+![Altbot hyperreasoning — plan branches, scoring, and graph](screenshots/reasoning.png)
+
+### Final
+![Completed build — workspace ready to save, export, or push](screenshots/final.png)
 
 ## How to Run Locally
 
