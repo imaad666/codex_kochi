@@ -2279,6 +2279,12 @@ function App() {
 
   const goHome = useCallback(() => setStage("intro"), []);
 
+  const editorDiagnostic = useMemo(() => {
+    if (!activeFile) return { ok: true };
+    const entry = fileSystem[activeFile];
+    return lintSource(activeFile, entry?.code || "");
+  }, [activeFile, fileSystem]);
+
   const renderInspoBoard = (compact = false) => (
     <div className={`inspo-board ${compact ? "compact" : ""}`}>
       <div className="inspo-head">
@@ -4615,10 +4621,6 @@ function App() {
 
   const files = Object.keys(fileSystem);
   const activeFileEntry = activeFile ? fileSystem[activeFile] : null;
-  const editorDiagnostic = useMemo(() => {
-    if (!activeFile) return { ok: true };
-    return lintSource(activeFile, activeFileEntry?.code || "");
-  }, [activeFile, activeFileEntry?.code]);
   const hasWorkspaceFiles = files.length > 0 && !runningAgents.length;
   const hasRunExport = Boolean(status.runId && hasWorkspaceFiles);
 
