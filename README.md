@@ -12,13 +12,26 @@ Builders need a way to see architecture get decided before code is written, watc
 
 ## Solution
 
-Open IDE turns a prompt into a structured swarm run:
+Open IDE runs a three-stage pipeline over **Groq** — plan, execute, ship — with the repo as source of truth.
 
-1. **Altbot** (controller) generates three genuinely different plan branches, scores them, prunes losers, and deploys only the winner — saving tokens before any agent writes a file.
-2. **Ives UI**, **Jobalyser**, and **WzData** (sub agents) selectable - each run step-scoped subagents on their own Groq model, streaming files into a shared workspace in real time.
-3. The user lands in a full IDE shell — file explorer, code editor, terminal, agent chat, hyperreasoning graph — and can save, export, preview, or push to GitHub.
+**1. Hyperreasoning (Altbot · `llama-4-scout`)**  
+Altbot calls Groq with structured JSON output to generate three distinct architectural branches, score them on feasibility/complexity/fit, prune the losers, and emit a dependency-aware execution plan. The search graph (React Flow + dagre) renders branches, pruning, and the winning path before any code is written — cutting wasted tokens on bad plans.
 
-Hyperreasoning happens first. Specialists execute second. The repo stays central throughout.
+**2. Swarm execution (lane subagents · per-model Groq workers)**  
+Selected card agents spawn step-scoped subagents — one Groq call per plan step, streamed over **SSE** from Express:
+
+| Agent | Model | Lane |
+|-------|-------|------|
+| **Ives UI** | `llama-3.3-70b-versatile` | React, CSS, layout, components |
+| **Jobalyser** | `qwen/qwen3-32b` | APIs, `server.js`, routes, middleware |
+| **WzData** | `llama-3.1-8b-instant` | Schemas, SQL, migrations, data contracts |
+
+Files stream into the workspace in real time via chunked SSE events. Payloads are throttled and trimmed to stay within Groq TPM limits.
+
+**3. IDE + GitHub sync**  
+The user edits in a lightweight code editor with lint feedback, runs terminal/git helpers, chats with lane specialists, and pushes the live workspace to GitHub via the **REST Contents API** (OAuth). Sessions and runs persist in **Vercel Blob** (or local `.open-ide/` in dev). Export as zip or preview when `server.js` is present.
+
+Hyperreasoning first. Specialists second. Repo central throughout.
 
 ## Features
 
