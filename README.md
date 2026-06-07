@@ -61,19 +61,19 @@ Demo or pitch video link: _coming soon_
 
 ## Screenshots
 
-### Welcome
+### Welcome Screen
 ![Open IDE welcome / intro screen](screenshots/welcome_1.png)
 
-### Agents
+### Agents Screen
 ![Agent card selection — Altbot, Ives UI, Jobalyser, WzData](screenshots/agents.png)
 
 ### IDE
 ![Live IDE — file explorer, editor, terminal, and agent chat](screenshots/ide.png)
 
-### Reasoning
+### Reasoning Section
 ![Altbot hyperreasoning — plan branches, scoring, and graph](screenshots/reasoning.png)
 
-### Final
+### GitHub Repo created by OpenIDE
 ![Completed build — workspace ready to save, export, or push](screenshots/final.png)
 
 ## How to Run Locally
