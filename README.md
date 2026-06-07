@@ -57,7 +57,7 @@ OpenAI Codex was used as an AI coding collaborator during development of this re
 
 ## Demo
 
-Demo or pitch video link: _coming soon_
+Demo video link: https://drive.google.com/file/d/1FVWv8SgT-vSI_ToOFzJ1kKepLAfEUPgn/view?usp=drivesdk
 
 ## Screenshots
 
